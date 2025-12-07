@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:tauri:fast": "cargo nextest run --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

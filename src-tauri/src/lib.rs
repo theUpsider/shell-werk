@@ -1,6 +1,9 @@
-mod llm;
+pub mod llm;
 
-pub use llm::{LlmConfiguration, LlmModel, LlmProvider, LlmState};
+pub use llm::{
+    ChatMessage, ChatRole, DialogueRequest, DialogueResponse, LlmConfiguration, LlmModel,
+    LlmProvider, LlmState, StreamRequest,
+};
 use tauri::Manager;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -40,6 +43,23 @@ fn select_llm_model(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn chat_dialogue(
+    state: tauri::State<LlmState>,
+    payload: DialogueRequest,
+) -> Result<DialogueResponse, String> {
+    llm::run_dialogue(state.inner(), payload).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn chat_dialogue_stream(
+    app: tauri::AppHandle,
+    state: tauri::State<LlmState>,
+    payload: StreamRequest,
+) -> Result<(), String> {
+    llm::run_stream(app, state.inner(), payload).map_err(|err| err.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -54,7 +74,9 @@ pub fn run() {
             get_llm_configuration,
             save_llm_configuration,
             list_llm_models,
-            select_llm_model
+            select_llm_model,
+            chat_dialogue,
+            chat_dialogue_stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

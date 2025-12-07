@@ -1,11 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import "./App.css";
 
+const STREAM_EVENT = "llm-stream";
+
+type ChatRole = "user" | "assistant" | "tool" | "system";
+
 type ChatMessage = {
   id: string;
-  sender: "user" | "system";
-  text: string;
+  role: ChatRole;
+  content: string;
+  toolCallId?: string | null;
 };
 
 type Provider = "vllm" | "ollama";
@@ -29,6 +35,11 @@ type LlmModel = {
   provider: Provider;
 };
 
+type StreamEvent =
+  | { type: "answer"; requestId: string; delta: string }
+  | { type: "done"; requestId: string }
+  | { type: "error"; requestId: string; message?: string };
+
 const providerLabels: Record<Provider, string> = {
   vllm: "vLLM",
   ollama: "Ollama",
@@ -45,13 +56,14 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome-1",
-      sender: "system",
-      text: "Welcome! Connect to a provider and select a model to begin chatting.",
+      role: "system",
+      content:
+        "Welcome! Connect to a provider and select a model to begin chatting.",
     },
     {
       id: "welcome-2",
-      sender: "user",
-      text: "Configuration ready.",
+      role: "assistant",
+      content: "Configuration ready.",
     },
   ]);
   const [draft, setDraft] = useState("");
@@ -62,7 +74,22 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+  const [isSending, setIsSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const activeStreamRef = useRef<{
+    requestId: string;
+    assistantId: string;
+  } | null>(null);
+
+  const appendStreamDelta = (assistantId: string, delta: string) => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === assistantId
+          ? { ...message, content: message.content + delta }
+          : message
+      )
+    );
+  };
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -97,9 +124,67 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+
+    const handler = (payload: StreamEvent) => {
+      const active = activeStreamRef.current;
+      if (!active || active.requestId !== payload.requestId) {
+        return;
+      }
+
+      if (payload.type === "answer") {
+        appendStreamDelta(active.assistantId, payload.delta ?? "");
+      } else if (payload.type === "done") {
+        activeStreamRef.current = null;
+        setIsSending(false);
+      } else if (payload.type === "error") {
+        setError(payload.message ?? "Stream error");
+        activeStreamRef.current = null;
+        setIsSending(false);
+      }
+    };
+
+    const attach = async () => {
+      try {
+        const dispose = await listen<StreamEvent>(STREAM_EVENT, ({ payload }) =>
+          handler(payload)
+        );
+        if (cancelled) {
+          dispose();
+        } else {
+          cleanup = dispose;
+        }
+      } catch (err) {
+        console.warn("Falling back to DOM listener for stream events", err);
+        const domHandler = (event: Event) => {
+          const custom = event as CustomEvent<StreamEvent>;
+          if (!custom.detail) return;
+          handler(custom.detail);
+        };
+        globalThis.addEventListener(STREAM_EVENT, domHandler as EventListener);
+        cleanup = () =>
+          globalThis.removeEventListener(
+            STREAM_EVENT,
+            domHandler as EventListener
+          );
+      }
+    };
+
+    void attach();
+
+    return () => {
+      cancelled = true;
+      if (cleanup) {
+        cleanup();
+      }
+    };
+  }, []);
+
   const normalizeStatus = (message: string) => {
     setStatus(message);
-    window.setTimeout(() => setStatus(null), 4000);
+    globalThis.setTimeout(() => setStatus(null), 4000);
   };
 
   const persistConfiguration = async (nextConfig: LlmConfiguration) => {
@@ -191,19 +276,61 @@ function App() {
     }
   };
 
+  const startStream = async (
+    input: string,
+    history: ChatMessage[],
+    requestId: string
+  ) => {
+    setIsSending(true);
+    try {
+      await invoke("chat_dialogue_stream", {
+        payload: { input, history, requestId },
+      });
+      setError(null);
+    } catch (err) {
+      activeStreamRef.current = null;
+      setIsSending(false);
+      setError(normalizeError(err));
+    }
+  };
+
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const next = draft.trim();
     if (!next) return;
+    if (!config?.selectedModel) {
+      setError("Select a model before chatting");
+      return;
+    }
 
-    const newMessage: ChatMessage = {
+    const requestId = crypto.randomUUID();
+
+    const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
-      sender: "user",
-      text: next,
+      role: "user",
+      content: next,
     };
 
-    setMessages((prev) => [...prev, newMessage]);
+    const assistantMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: "",
+    };
+
     setDraft("");
+    setMessages((prev) => {
+      const history = [...prev, userMessage];
+      activeStreamRef.current = {
+        requestId,
+        assistantId: assistantMessage.id,
+      };
+      (globalThis as any).__STREAM_DEBUG__ = {
+        requestId,
+        assistantId: assistantMessage.id,
+      };
+      void startStream(next, history, requestId);
+      return [...prev, userMessage, assistantMessage];
+    });
   };
 
   return (
@@ -357,13 +484,19 @@ function App() {
             <article
               key={message.id}
               className={`message ${
-                message.sender === "user" ? "message-out" : "message-in"
+                message.role === "user" ? "message-out" : "message-in"
               }`}
             >
               <div className="message-meta">
-                {message.sender === "user" ? "You" : "Assistant"}
+                {message.role === "user"
+                  ? "You"
+                  : message.role === "assistant"
+                  ? "Assistant"
+                  : message.role === "tool"
+                  ? "Tool"
+                  : "System"}
               </div>
-              <div className="message-bubble">{message.text}</div>
+              <div className="message-bubble">{message.content}</div>
             </article>
           ))}
         </div>
@@ -376,9 +509,10 @@ function App() {
           value={draft}
           onChange={(event) => setDraft(event.currentTarget.value)}
           aria-label="Message input"
+          disabled={isSending}
         />
-        <button className="chat-send" type="submit">
-          Send
+        <button className="chat-send" type="submit" disabled={isSending}>
+          {isSending ? "Sending..." : "Send"}
         </button>
       </form>
     </main>

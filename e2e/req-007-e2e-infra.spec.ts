@@ -14,7 +14,7 @@ const [
   ciUsesMocks,
 ] = loadAcceptanceCriteria(requirementId);
 
-const deliveredRequirements = ["REQ-001"];
+const deliveredRequirements = ["REQ-001", "REQ-013"];
 const e2eDirectory = path.resolve(workspaceRoot, "e2e");
 
 test.describe(`${requirementId}: E2E Testing Infrastructure`, () => {
