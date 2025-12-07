@@ -43,3 +43,6 @@ jobs:
 
       - name: Run mocked Tauri tests
         run: yarn test:tauri
+
+      - name: Run end-to-end tests
+        run: yarn test:e2e
