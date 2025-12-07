@@ -1,49 +1,87 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+type ChatMessage = {
+  id: string;
+  sender: "user" | "system";
+  text: string;
+};
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+function App() {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome-1",
+      sender: "system",
+      text: "Welcome! Ask me anything and I will respond.",
+    },
+    {
+      id: "welcome-2",
+      sender: "user",
+      text: "Let’s get started.",
+    },
+  ]);
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    const next = draft.trim();
+    if (!next) return;
+
+    const newMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      sender: "user",
+      text: next,
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+    setDraft("");
+  };
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <main className="chat-shell">
+      <header className="chat-header">
+        <div className="chat-title">Shell Werk</div>
+        <div className="chat-subtitle">Your conversational workspace</div>
+      </header>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
+      <section
+        className="chat-window"
+        ref={scrollRef}
+        aria-label="Chat history"
       >
+        {messages.map((message) => (
+          <article
+            key={message.id}
+            className={`message ${
+              message.sender === "user" ? "message-out" : "message-in"
+            }`}
+          >
+            <div className="message-meta">
+              {message.sender === "user" ? "You" : "Assistant"}
+            </div>
+            <div className="message-bubble">{message.text}</div>
+          </article>
+        ))}
+      </section>
+
+      <form className="chat-input-bar" onSubmit={handleSubmit}>
         <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+          className="chat-input"
+          placeholder="Type your message..."
+          value={draft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          aria-label="Message input"
         />
-        <button type="submit">Greet</button>
+        <button className="chat-send" type="submit">
+          Send
+        </button>
       </form>
-      <p>{greetMsg}</p>
     </main>
   );
 }
