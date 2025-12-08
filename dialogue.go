@@ -102,14 +102,17 @@ func newDialogueLoop(req ChatRequest) *dialogueLoop {
 	}
 }
 
-func (l *dialogueLoop) run(ctx context.Context, userMessage string) (ChatMessage, []DialogueTrace, error) {
+func (l *dialogueLoop) run(ctx context.Context, req ChatRequest) (ChatMessage, []DialogueTrace, error) {
 	trace := []DialogueTrace{}
 	start := time.Now()
 
 	toolDefs := l.buildToolDefinitions()
 	messages := []chatCompletionMessage{
 		{Role: "system", Content: l.systemPrompt()},
-		{Role: "user", Content: userMessage},
+	}
+
+	for _, msg := range conversationFromRequest(req) {
+		messages = append(messages, chatCompletionMessage{Role: msg.Role, Content: msg.Content})
 	}
 
 	// Allow up to six tool iterations per request to avoid runaway loops.

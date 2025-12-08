@@ -21,7 +21,18 @@ type ChatProvider interface {
 type MockProvider struct{}
 
 func (m MockProvider) Chat(_ context.Context, req ChatRequest) (ChatMessage, error) {
-	content := fmt.Sprintf("[mock %s/%s] %s", strings.ToLower(req.Provider), req.Model, req.Message)
+	conversation := conversationFromRequest(req)
+
+	// Use the latest user turn for deterministic echoing.
+	latest := req.Message
+	for i := len(conversation) - 1; i >= 0; i-- {
+		if conversation[i].Role == "user" {
+			latest = conversation[i].Content
+			break
+		}
+	}
+
+	content := fmt.Sprintf("[mock %s/%s] %s", strings.ToLower(req.Provider), req.Model, latest)
 	return ChatMessage{Role: "assistant", Content: content}, nil
 }
 
@@ -90,12 +101,12 @@ func normalizeBase(endpoint string) string {
 }
 
 func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, error) {
+	messages := conversationFromRequest(req)
+
 	payload := chatPayload{
-		Model:  req.Model,
-		Stream: false,
-		Messages: []ChatMessage{
-			{Role: "user", Content: req.Message},
-		},
+		Model:    req.Model,
+		Stream:   false,
+		Messages: messages,
 	}
 
 	body, err := json.Marshal(payload)
@@ -141,12 +152,12 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 }
 
 func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, error) {
+	messages := conversationFromRequest(req)
+
 	payload := chatPayload{
-		Model:  req.Model,
-		Stream: false,
-		Messages: []ChatMessage{
-			{Role: "user", Content: req.Message},
-		},
+		Model:    req.Model,
+		Stream:   false,
+		Messages: messages,
 	}
 
 	// Only request tool selection when tools are actually provided to avoid vLLM 400s.

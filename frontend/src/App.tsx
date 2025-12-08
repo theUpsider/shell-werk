@@ -1,6 +1,7 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Chat, GetTools, Models } from "../wailsjs/go/main/App";
+import { main } from "../wailsjs/go/models";
 import { loadSettings, persistSettings, type SettingsState } from "./settings";
 import "./App.css";
 
@@ -20,17 +21,6 @@ interface ChatSession {
   updatedAt: string;
   messages: ChatMessage[];
   toolChoices: Record<string, boolean>;
-}
-
-interface ChatRequestPayload {
-  sessionId: string;
-  provider: string;
-  endpoint: string;
-  apiKey: string;
-  model: string;
-  message: string;
-  tools: string[];
-  chatOnly: boolean;
 }
 
 interface ChatResponsePayload {
@@ -220,6 +210,22 @@ function App() {
     const text = draft.trim();
     if (!text || !activeSession || isSending) return;
 
+    const selectedTools = settings.chatOnly
+      ? []
+      : toolCatalog
+          .filter((tool) => tool.enabled)
+          .filter((tool) => {
+            if (!tool.uiVisible) {
+              return !hiddenDisabled.has(tool.id);
+            }
+            return !!(activeSession.toolChoices ?? toolDefaults)[tool.id];
+          })
+          .map((tool) => tool.id);
+
+    const history = (activeSession?.messages ?? [])
+      .filter((msg) => msg.role === "user" || msg.role === "assistant")
+      .map((msg) => ({ role: msg.role, content: msg.content }));
+
     const userMessage: ChatMessage = {
       id: createId(),
       role: "user",
@@ -251,26 +257,17 @@ function App() {
 
     setDraft("");
     setIsSending(true);
-    const payload: ChatRequestPayload = {
+    const payload = main.ChatRequest.createFrom({
       sessionId: activeSession.id,
       provider: settings.provider,
       endpoint: settings.endpoint,
       apiKey: settings.apiKey,
       model: settings.model,
       message: text,
-      tools: settings.chatOnly
-        ? []
-        : toolCatalog
-            .filter((tool) => tool.enabled)
-            .filter((tool) => {
-              if (!tool.uiVisible) {
-                return !hiddenDisabled.has(tool.id);
-              }
-              return !!(activeSession.toolChoices ?? toolDefaults)[tool.id];
-            })
-            .map((tool) => tool.id),
+      history,
+      tools: selectedTools,
       chatOnly: settings.chatOnly,
-    };
+    });
 
     console.log("[Chat Request]", {
       provider: payload.provider,

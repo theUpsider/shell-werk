@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,14 +21,15 @@ type ChatMessage struct {
 
 // ChatRequest carries the minimal inputs to produce a reply.
 type ChatRequest struct {
-	SessionID string   `json:"sessionId"`
-	Provider  string   `json:"provider"`
-	Endpoint  string   `json:"endpoint"`
-	APIKey    string   `json:"apiKey"`
-	Model     string   `json:"model"`
-	Message   string   `json:"message"`
-	Tools     []string `json:"tools"`
-	ChatOnly  bool     `json:"chatOnly"`
+	SessionID string        `json:"sessionId"`
+	Provider  string        `json:"provider"`
+	Endpoint  string        `json:"endpoint"`
+	APIKey    string        `json:"apiKey"`
+	Model     string        `json:"model"`
+	Message   string        `json:"message"`
+	History   []ChatMessage `json:"history"`
+	Tools     []string      `json:"tools"`
+	ChatOnly  bool          `json:"chatOnly"`
 }
 
 // ChatResponse returns the assistant message content (stubbed for now).
@@ -80,6 +82,12 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 		ctx = context.Background()
 	}
 
+	// Normalize the incoming history and append the latest user message so all providers
+	// and the dialogue loop receive the full conversation context.
+	req.History = conversationFromRequest(req)
+	// The latest user turn is now embedded in History; clear Message to avoid double-appending downstream.
+	req.Message = ""
+
 	if req.ChatOnly || len(req.Tools) == 0 {
 		provider := ProviderFor(req.Provider)
 		msg, err := provider.Chat(ctx, req)
@@ -96,12 +104,42 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	defer cancel()
 
 	loop := newDialogueLoop(req)
-	msg, trace, err := loop.run(ctx, req.Message)
+	msg, trace, err := loop.run(ctx, req)
 	return ChatResponse{
 		Message:   msg,
 		LatencyMs: time.Since(start).Milliseconds(),
 		Trace:     trace,
 	}, err
+}
+
+// conversationFromRequest merges prior user/assistant turns with the latest user
+// message, ignoring tool/system entries to keep provider payloads valid.
+func conversationFromRequest(req ChatRequest) []ChatMessage {
+	history := normalizeHistory(req.History)
+
+	if text := strings.TrimSpace(req.Message); text != "" {
+		history = append(history, ChatMessage{Role: "user", Content: text})
+	}
+
+	return history
+}
+
+// normalizeHistory filters out empty content and non-dialogue roles. It preserves
+// chronological order for the model while avoiding placeholder messages.
+func normalizeHistory(history []ChatMessage) []ChatMessage {
+	cleaned := make([]ChatMessage, 0, len(history))
+	for _, msg := range history {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		cleaned = append(cleaned, ChatMessage{Role: role, Content: content})
+	}
+	return cleaned
 }
 
 // Models returns the provider's available models for the configured endpoint.

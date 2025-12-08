@@ -152,7 +152,7 @@ func TestVLLMProviderChatSuccess(t *testing.T) {
 	defer server.Close()
 
 	provider := VLLMProvider{client: server.Client()}
-	msg, err := provider.Chat(context.Background(), ChatRequest{Endpoint: server.URL, Model: "mistral", Message: "ping", APIKey: "secret"})
+	msg, err := provider.Chat(context.Background(), ChatRequest{Endpoint: server.URL, Model: "mistral", Message: "ping", APIKey: "secret", Tools: []string{"browser"}})
 	if err != nil {
 		t.Fatalf("VLLMProvider.Chat returned error: %v", err)
 	}
