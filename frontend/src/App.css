@@ -326,6 +326,16 @@
   margin-top: 0.5rem;
 }
 
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.error-text {
+  color: #c0392b;
+}
+
 .muted {
   color: rgba(255, 255, 255, 0.65);
   font-size: 0.95rem;

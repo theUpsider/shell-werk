@@ -5,3 +5,5 @@ import {main} from '../models';
 export function Chat(arg1:main.ChatRequest):Promise<main.ChatResponse>;
 
 export function Greet(arg1:string):Promise<string>;
+
+export function Models(arg1:main.ModelsRequest):Promise<main.ModelsResponse>;

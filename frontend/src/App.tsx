@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Chat } from "../wailsjs/go/main/App";
+import { Chat, Models } from "../wailsjs/go/main/App";
 import { loadSettings, persistSettings, type SettingsState } from "./settings";
 import "./App.css";
 
@@ -94,6 +94,9 @@ function App() {
   );
   const [isSending, setIsSending] = useState(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -109,6 +112,11 @@ function App() {
   useEffect(() => {
     persistSettings(globalThis.localStorage, settings);
   }, [settings]);
+
+  useEffect(() => {
+    setModels([]);
+    setModelError(null);
+  }, [settings.provider, settings.endpoint]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -230,6 +238,24 @@ function App() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleLoadModels = () => {
+    setIsLoadingModels(true);
+    setModelError(null);
+    Models({ provider: settings.provider, endpoint: settings.endpoint })
+      .then((res) => {
+        const next = res?.models ?? [];
+        setModels(next);
+        if (next.length && !settings.model) {
+          setSettings((prev) => ({ ...prev, model: next[0] }));
+        }
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "Failed to load models";
+        setModelError(message);
+      })
+      .finally(() => setIsLoadingModels(false));
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -327,9 +353,14 @@ function App() {
 
       {showSettings && (
         <div className="modal-backdrop">
-          <dialog className="modal" open aria-modal="true">
+          <dialog
+            className="modal"
+            open
+            aria-modal="true"
+            aria-labelledby="settings-title"
+          >
             <div className="modal-header">
-              <h3>Model settings</h3>
+              <h3 id="settings-title">Model settings</h3>
               <button className="ghost" onClick={() => setShowSettings(false)}>
                 Close
               </button>
@@ -361,15 +392,44 @@ function App() {
               </label>
               <label>
                 <span className="label-text">Model</span>
-                <input
-                  type="text"
-                  value={settings.model}
-                  onChange={(e) =>
-                    handleSettingsChange("model", e.target.value)
-                  }
-                  placeholder="qwen-3"
-                />
+                {models.length ? (
+                  <select
+                    value={settings.model}
+                    onChange={(e) =>
+                      handleSettingsChange("model", e.target.value)
+                    }
+                  >
+                    {models.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={settings.model}
+                    onChange={(e) =>
+                      handleSettingsChange("model", e.target.value)
+                    }
+                    placeholder="qwen-3"
+                  />
+                )}
               </label>
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={handleLoadModels}
+                  disabled={isLoadingModels}
+                >
+                  {isLoadingModels ? "Loading models..." : "Load models"}
+                </button>
+                {modelError && <span className="error-text">{modelError}</span>}
+                {!modelError && models.length > 0 && (
+                  <span className="muted">{models.length} models available</span>
+                )}
+              </div>
               <p className="muted">
                 Full provider wiring coming in later milestones.
               </p>

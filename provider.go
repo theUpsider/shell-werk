@@ -64,6 +64,18 @@ type vllmResponse struct {
 	} `json:"error"`
 }
 
+type ollamaTagsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+type vllmModelsResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
 func makeClient() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
@@ -189,4 +201,87 @@ func ProviderFor(name string) ChatProvider {
 	default:
 		return MockProvider{}
 	}
+}
+
+// ListModels returns available model identifiers for the given provider and endpoint.
+// The HTTP client can be injected for tests; makeClient is used when nil.
+func ListModels(ctx context.Context, provider, endpoint string, client *http.Client) ([]string, error) {
+	if client == nil {
+		client = makeClient()
+	}
+
+	base := normalizeBase(endpoint)
+
+	switch strings.ToLower(provider) {
+	case "ollama":
+		return listOllamaModels(ctx, base, client)
+	case "vllm":
+		return listVLLMModels(ctx, base, client)
+	case "mock":
+		return []string{"mock"}, nil
+	default:
+		return nil, fmt.Errorf("unsupported provider %q", provider)
+	}
+}
+
+func listOllamaModels(ctx context.Context, base string, client *http.Client) ([]string, error) {
+	url := base + "/api/tags"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("ollama list models: %s", resp.Status)
+	}
+
+	var decoded ollamaTagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, model := range decoded.Models {
+		if strings.TrimSpace(model.Name) != "" {
+			models = append(models, model.Name)
+		}
+	}
+	return models, nil
+}
+
+func listVLLMModels(ctx context.Context, base string, client *http.Client) ([]string, error) {
+	url := base + "/v1/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("vllm list models: %s", resp.Status)
+	}
+
+	var decoded vllmModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, model := range decoded.Data {
+		if strings.TrimSpace(model.ID) != "" {
+			models = append(models, model.ID)
+		}
+	}
+	return models, nil
 }

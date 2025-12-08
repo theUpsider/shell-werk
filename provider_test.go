@@ -214,3 +214,64 @@ func TestVLLMProviderChatDefaultsAndErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestListModelsOllama(t *testing.T) {
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.URL.Path != "/api/tags" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(ollamaTagsResponse{Models: []struct {
+			Name string `json:"name"`
+		}{{Name: "llama3"}, {Name: ""}}})
+	}))
+	defer server.Close()
+
+	models, err := ListModels(context.Background(), "ollama", server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected request to be sent")
+	}
+	if len(models) != 1 || models[0] != "llama3" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
+func TestListModelsVLLM(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(vllmModelsResponse{Data: []struct {
+			ID string `json:"id"`
+		}{{ID: "mixtral"}, {ID: ""}}})
+	}))
+	defer server.Close()
+
+	models, err := ListModels(context.Background(), "vllm", server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if len(models) != 1 || models[0] != "mixtral" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
+func TestListModelsErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	_, err := ListModels(context.Background(), "ollama", server.URL, server.Client())
+	if err == nil || !strings.Contains(err.Error(), "ollama list models") {
+		t.Fatalf("expected ollama error, got %v", err)
+	}
+
+	if _, err := ListModels(context.Background(), "unknown", server.URL, server.Client()); err == nil {
+		t.Fatalf("expected error for unsupported provider")
+	}
+}

@@ -9,3 +9,7 @@ export function Chat(arg1) {
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
+
+export function Models(arg1) {
+  return window['go']['main']['App']['Models'](arg1);
+}
