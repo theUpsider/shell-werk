@@ -4,7 +4,15 @@ import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 import App from "./App";
 import { Chat } from "../wailsjs/go/main/App";
 
@@ -107,7 +115,9 @@ describe("REQ-001: chat interface", () => {
 
     const children = Array.from(pane.children);
     const composer = children.at(-1);
-    const feed = children.find((child) => child.classList.contains("chat-feed"));
+    const feed = children.find((child) =>
+      child.classList.contains("chat-feed")
+    );
 
     expect(composer?.classList.contains("composer")).toBe(true);
     expect(feed).toBeDefined();

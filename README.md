@@ -25,12 +25,11 @@ To build a redistributable, production mode package, use `wails build`.
 
 - Playwright end-to-end tests (mocked providers by default):
 
-  - Install Node deps in `frontend` and root as needed
-  - `npm -C frontend ci` ; `npm -C frontend run build`
-  - `npx playwright install --with-deps`
-  - `npx playwright test`
+  - Install Node deps: `npm -C frontend install`
+  - Install browsers (first run): `npx -C frontend playwright install --with-deps chromium`
+  - Run tests: `npm -C frontend run test:e2e`
 
 - Real providers locally (optional):
-  - Set `USE_REAL_LLM=1` in your environment to opt in to real Ollama/vLLM during local e2e runs. CI always uses mocks.
+  - `$env:E2E_USE_REAL_PROVIDER=1; npm -C frontend run test:e2e` (requires the Wails app + provider running locally). CI always uses the mocked bridge.
 
-Note: The CI workflow should run `go test ./...` and `npx playwright test` on push/PR. The badge above points to `actions/workflows/ci.yml`—adjust if your workflow file uses a different name.
+Note: The CI workflow should run `go test ./...` and `npm -C frontend run test:e2e` on push/PR. The badge above points to `actions/workflows/ci.yml`—adjust if your workflow file uses a different name.
