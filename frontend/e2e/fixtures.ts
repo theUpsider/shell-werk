@@ -1,43 +1,43 @@
-import {test as base} from '@playwright/test'
+import { test as base } from "@playwright/test";
 
 declare global {
   interface Window {
-    __E2E_PROVIDER_MODE?: 'mock' | 'real'
-    go?: Record<string, unknown>
+    __E2E_PROVIDER_MODE?: "mock" | "real";
+    go?: Record<string, unknown>;
   }
 }
 
-const useMockProvider = process.env.E2E_USE_REAL_PROVIDER !== '1'
+const useMockProvider = process.env.E2E_USE_REAL_PROVIDER !== "1";
 
 export const test = base.extend({
-  page: async ({page}, use) => {
+  page: async ({ page }, use) => {
     if (useMockProvider) {
       await page.addInitScript(() => {
         const respond = (content: string) => ({
-          message: {role: 'assistant', content},
-          latencyMs: 12
-        })
+          message: { role: "assistant", content },
+          latencyMs: 12,
+        });
 
-        globalThis.__E2E_PROVIDER_MODE = 'mock'
+        globalThis.__E2E_PROVIDER_MODE = "mock";
         globalThis.go = {
           main: {
             App: {
-              Chat: (payload: {message: string}) =>
+              Chat: (payload: { message: string }) =>
                 Promise.resolve(respond(`Stubbed: ${payload.message}`)),
-              Models: () => Promise.resolve({models: ['mock-model']}),
-              Greet: (name: string) => Promise.resolve(`Hello ${name}`)
-            }
-          }
-        }
-      })
+              Models: () => Promise.resolve({ models: ["mock-model"] }),
+              Greet: (name: string) => Promise.resolve(`Hello ${name}`),
+            },
+          },
+        };
+      });
     } else {
       await page.addInitScript(() => {
-        globalThis.__E2E_PROVIDER_MODE = 'real'
-      })
+        globalThis.__E2E_PROVIDER_MODE = "real";
+      });
     }
 
-    await use(page)
-  }
-})
+    await use(page);
+  },
+});
 
-export {expect} from '@playwright/test'
+export { expect } from "@playwright/test";
