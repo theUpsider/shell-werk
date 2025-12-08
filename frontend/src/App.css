@@ -52,6 +52,17 @@
   box-shadow: 0 10px 30px rgba(12, 186, 186, 0.2);
 }
 
+.primary.destructive {
+  background: linear-gradient(135deg, #ff6b6b, #ff3d3d);
+  color: #0c151c;
+  box-shadow: 0 10px 30px rgba(255, 107, 107, 0.4);
+}
+
+.primary.destructive:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 38px rgba(255, 107, 107, 0.45);
+}
+
 .primary:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -81,29 +92,73 @@
   overflow: auto;
   padding: 0.25rem 0;
 }
-
-.session-item {
+.session-row {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: 12px;
+  padding: 0.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.session-row:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.session-row.active {
+  border-color: #0cbaba;
+  background: rgba(12, 186, 186, 0.08);
+}
+
+.session-row .session-item {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.15rem;
-  border-radius: 12px;
-  padding: 0.75rem 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border: none;
+  background: transparent;
   color: #ffffff;
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  padding: 0.75rem 0.85rem;
+  text-align: left;
 }
 
-.session-item:hover {
-  border-color: rgba(255, 255, 255, 0.14);
+.session-row .session-item:hover {
+  outline: none;
 }
 
-.session-item.active {
-  border-color: #0cbaba;
-  background: rgba(12, 186, 186, 0.08);
+.session-row .session-item:focus-visible {
+  outline: 2px solid rgba(12, 186, 186, 0.7);
+  outline-offset: -2px;
+}
+
+.session-delete {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.session-delete:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ff7b7b;
+}
+
+.session-delete:focus-visible {
+  outline: 2px solid rgba(255, 123, 123, 0.8);
 }
 
 .session-title {
@@ -370,6 +425,20 @@
   overflow-y: auto;
   max-height: 60vh;
   padding-right: 0.25rem;
+}
+
+.warning-text {
+  margin: 0;
+  color: #fffbfb;
+  background: rgba(255, 92, 92, 0.32);
+  border: 1px solid rgba(255, 92, 92, 0.6);
+  border-radius: 12px;
+  padding: 0.8rem 1rem;
+  line-height: 1.4;
+}
+
+.warning-text strong {
+  color: #ffffff;
 }
 
 .modal label {

@@ -180,11 +180,24 @@ describe("REQ-002: sidebar and history", () => {
     render(<App />);
 
     const list = screen.getByRole("navigation", { name: /past chats/i });
-    expect(within(list).getAllByRole("button")).toHaveLength(2);
+    const sessionButtons = within(list)
+      .getAllByRole("button")
+      .filter(
+        (button) =>
+          !button
+            .getAttribute("aria-label")
+            ?.toLowerCase()
+            .includes("delete chat")
+      );
+    expect(sessionButtons).toHaveLength(2);
 
-    await user.click(
-      within(list).getByRole("button", { name: /beta session/i })
+    const betaButton = sessionButtons.find((button) =>
+      button.textContent?.toLowerCase().includes("beta session")
     );
+    if (!betaButton) {
+      throw new Error("Beta session selector not found");
+    }
+    await user.click(betaButton);
 
     expect(await screen.findByText("Beta message")).toBeInTheDocument();
     expect(screen.queryByText("First message")).not.toBeInTheDocument();

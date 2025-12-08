@@ -136,6 +136,7 @@ function App() {
   );
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingDeletionId, setPendingDeletionId] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsState>(() =>
     loadSettings(globalThis.localStorage)
   );
@@ -162,6 +163,10 @@ function App() {
     () => new Set(settings.hiddenToolsDisabled ?? []),
     [settings.hiddenToolsDisabled]
   );
+
+  const pendingDeletionSession = pendingDeletionId
+    ? sessions.find((session) => session.id === pendingDeletionId) ?? null
+    : null;
 
   const toolDefaults = useMemo(() => {
     const entries: Record<string, boolean> = {};
@@ -447,6 +452,52 @@ function App() {
     setActiveSessionId(next.id);
   };
 
+  const handleRequestDeleteSession = (
+    sessionId: string,
+    event?: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    event?.stopPropagation();
+    event?.preventDefault();
+    setPendingDeletionId(sessionId);
+  };
+
+  const handleCancelDelete = () => setPendingDeletionId(null);
+
+  const handleConfirmDelete = () => {
+    if (!pendingDeletionId) return;
+    const targetId = pendingDeletionId;
+    setPendingDeletionId(null);
+
+    setSessions((prev) => {
+      const remaining = prev.filter((session) => session.id !== targetId);
+      if (!remaining.length) {
+        const fallback = createEmptySession(toolDefaults);
+        setActiveSessionId(fallback.id);
+        return [fallback];
+      }
+
+      if (activeSessionId === targetId) {
+        const nextActive = [...remaining].sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() -
+            new Date(a.updatedAt).getTime()
+        )[0];
+        setActiveSessionId(nextActive.id);
+      }
+
+      return remaining;
+    });
+  };
+
+  const handleDeleteDialogKeyDown = (
+    event: React.KeyboardEvent<HTMLDialogElement>
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      handleCancelDelete();
+    }
+  };
+
   const handleSelectSession = (sessionId: string) => {
     setActiveSessionId(sessionId);
   };
@@ -529,22 +580,38 @@ function App() {
           New Chat
         </button>
         <nav className="session-list" aria-label="Past chats">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              className={`session-item ${
-                session.id === activeSession?.id ? "active" : ""
-              }`}
-              onClick={() => handleSelectSession(session.id)}
-            >
-              <span className="session-title">
-                {session.title || "New Chat"}
-              </span>
-              <span className="session-meta">
-                {new Date(session.updatedAt).toLocaleString()}
-              </span>
-            </button>
-          ))}
+          {sessions.map((session) => {
+            const isActive = session.id === activeSession?.id;
+            return (
+              <div
+                key={session.id}
+                className={`session-row ${isActive ? "active" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="session-item"
+                  onClick={() => handleSelectSession(session.id)}
+                >
+                  <span className="session-title">
+                    {session.title || "New Chat"}
+                  </span>
+                  <span className="session-meta">
+                    {new Date(session.updatedAt).toLocaleString()}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="session-delete"
+                  onClick={(event) =>
+                    handleRequestDeleteSession(session.id, event)
+                  }
+                  aria-label={`Delete chat ${session.title || "chat"}`}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+            );
+          })}
         </nav>
         <button className="ghost" onClick={() => setShowSettings(true)}>
           Settings
@@ -881,6 +948,51 @@ function App() {
                 </button>
               </div>
             </form>
+          </dialog>
+        </div>
+      )}
+
+      {pendingDeletionSession && (
+        <div className="modal-backdrop">
+          <dialog
+            className="modal delete-modal"
+            open
+            aria-modal="true"
+            role="dialog"
+            aria-labelledby="delete-dialog-title"
+            aria-describedby="delete-dialog-description"
+            onKeyDown={handleDeleteDialogKeyDown}
+          >
+            <div className="modal-header">
+              <h3 id="delete-dialog-title">Delete chat</h3>
+              <button className="ghost" onClick={handleCancelDelete}>
+                Cancel
+              </button>
+            </div>
+            <div className="modal-body">
+              <p
+                id="delete-dialog-description"
+                className="warning-text"
+              >
+                Deleting <strong>{pendingDeletionSession.title || "this chat"}</strong> is permanent and cannot be undone.
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleCancelDelete}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary destructive"
+                onClick={handleConfirmDelete}
+              >
+                Delete
+              </button>
+            </div>
           </dialog>
         </div>
       )}
