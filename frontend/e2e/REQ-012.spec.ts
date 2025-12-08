@@ -20,12 +20,12 @@ const disableChatOnly = async (page: Page) => {
 };
 
 test.describe("REQ-012: Tool Toggling in Chat Interface", () => {
-  test("chat-only disables tool toggles and omits tools", async ({ page }) => {
+  test("chat-only disables tool pills and omits tools", async ({ page }) => {
     await page.goto("/");
 
     const toggleRow = page.getByLabel("Tool toggles");
     await expect(
-      toggleRow.getByRole("button", { name: "Browser" })
+      toggleRow.getByRole("button", { name: "Disable Browser" })
     ).toBeDisabled();
 
     const composer = page.getByPlaceholder("Message shell-werk");
@@ -40,21 +40,26 @@ test.describe("REQ-012: Tool Toggling in Chat Interface", () => {
     expect(payload?.tools ?? []).toHaveLength(0);
   });
 
-  test("UI-visible tool shows tooltip, can toggle when chat-only off, and tools reach payload", async ({
+  test("UI-visible tool pill toggles via remove/add and tools reach payload", async ({
     page,
   }) => {
     await page.goto("/");
 
     const toggleRow = page.getByLabel("Tool toggles");
-    const browserToggle = toggleRow.getByRole("button", { name: "Browser" });
-    await expect(browserToggle).toHaveAttribute("title", TOOL_DESCRIPTION);
+    const browserPill = toggleRow.getByRole("button", {
+      name: "Disable Browser",
+    });
+    await expect(browserPill).toHaveAttribute("title", TOOL_DESCRIPTION);
 
     await openSettings(page);
     await disableChatOnly(page);
 
-    await expect(browserToggle).toBeEnabled();
-    await browserToggle.click(); // flip off
-    await browserToggle.click(); // flip back on
+    await expect(browserPill).toBeEnabled();
+    await browserPill.click(); // remove Browser from enabled list
+
+    const addButton = toggleRow.getByRole("button", { name: "Add tools" });
+    await addButton.click();
+    await toggleRow.getByRole("menuitem", { name: "Enable Browser" }).click();
 
     const composer = page.getByPlaceholder("Message shell-werk");
     await composer.fill("Tools enabled");
