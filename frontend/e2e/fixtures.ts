@@ -61,14 +61,21 @@ export const test = base.extend({
     } else {
       await page.exposeFunction(
         "__realChat",
-        async (payload: { message: string; model?: string; tools?: string[] }) => {
+        async (payload: {
+          message: string;
+          model?: string;
+          tools?: string[];
+        }) => {
           const tools = buildToolDefinitions(payload.tools ?? []);
           const sys = {
             role: "system",
             content:
               "You are shell-werk. Use tools and finalize with request_fullfilled when done.",
           };
-          const messages: any[] = [sys, { role: "user", content: payload.message }];
+          const messages: any[] = [
+            sys,
+            { role: "user", content: payload.message },
+          ];
 
           for (let i = 0; i < 4; i++) {
             const body = {
@@ -84,7 +91,9 @@ export const test = base.extend({
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                ...(realApiKey ? { Authorization: `Bearer ${realApiKey}` } : {}),
+                ...(realApiKey
+                  ? { Authorization: `Bearer ${realApiKey}` }
+                  : {}),
               },
               body: JSON.stringify(body),
             });
@@ -94,7 +103,11 @@ export const test = base.extend({
             const toolCalls: any[] = choice?.message?.tool_calls || [];
             const content: string = choice?.message?.content || "";
             if (!toolCalls.length) {
-              return { message: { role: "assistant", content }, latencyMs: 20, trace: [] };
+              return {
+                message: { role: "assistant", content },
+                latencyMs: 20,
+                trace: [],
+              };
             }
 
             messages.push(choice.message);
@@ -148,8 +161,9 @@ export const test = base.extend({
           main: {
             App: {
               Chat: (payload: any) =>
-                (globalThis as { __realChat?: (input: any) => Promise<any> })
-                  .__realChat?.(payload),
+                (
+                  globalThis as { __realChat?: (input: any) => Promise<any> }
+                ).__realChat?.(payload),
               Models: () => Promise.resolve({ models: [] }),
               GetTools: () =>
                 Promise.resolve([

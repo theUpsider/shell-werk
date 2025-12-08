@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -222,8 +223,12 @@ func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCom
 		Messages:    messages,
 		Stream:      false,
 		Tools:       tools,
-		ToolChoice:  "auto",
 		Temperature: 0,
+	}
+
+	// Avoid sending tool_choice when no tools are available; vLLM rejects that with 400.
+	if len(tools) > 0 {
+		payload.ToolChoice = "auto"
 	}
 
 	body, err := json.Marshal(payload)
@@ -232,6 +237,7 @@ func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCom
 	}
 
 	url := l.completionsURL()
+	log.Printf("[%s] Sending dialogue completion request to %s with model %s", time.Now().Format(time.RFC3339), url, l.model)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return completionChoice{}, err
@@ -246,6 +252,7 @@ func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCom
 		return completionChoice{}, err
 	}
 	defer resp.Body.Close()
+	log.Printf("[%s] Received dialogue completion response", time.Now().Format(time.RFC3339))
 
 	var decoded completionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {

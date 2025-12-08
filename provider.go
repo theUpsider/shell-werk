@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -103,6 +104,7 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 	}
 
 	url := normalizeBase(req.Endpoint) + "/api/chat"
+	log.Printf("[%s] Sending Ollama request to %s with model %s", time.Now().Format(time.RFC3339), url, req.Model)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return ChatMessage{}, err
@@ -114,6 +116,7 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 		return ChatMessage{}, err
 	}
 	defer resp.Body.Close()
+	log.Printf("[%s] Received Ollama response", time.Now().Format(time.RFC3339))
 
 	var decoded ollamaResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
@@ -144,7 +147,11 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 		Messages: []ChatMessage{
 			{Role: "user", Content: req.Message},
 		},
-		ToolChoice: "auto",
+	}
+
+	// Only request tool selection when tools are actually provided to avoid vLLM 400s.
+	if len(req.Tools) > 0 {
+		payload.ToolChoice = "auto"
 	}
 
 	body, err := json.Marshal(payload)
@@ -153,6 +160,7 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 	}
 
 	url := normalizeBase(req.Endpoint) + "/v1/chat/completions"
+	log.Printf("[%s] Sending VLLM request to %s with model %s", time.Now().Format(time.RFC3339), url, req.Model)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return ChatMessage{}, err
@@ -167,6 +175,7 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 		return ChatMessage{}, err
 	}
 	defer resp.Body.Close()
+	log.Printf("[%s] Received VLLM response", time.Now().Format(time.RFC3339))
 
 	var decoded vllmResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {

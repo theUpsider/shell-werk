@@ -272,6 +272,14 @@ function App() {
       chatOnly: settings.chatOnly,
     };
 
+    console.log("[Chat Request]", {
+      provider: payload.provider,
+      endpoint: payload.endpoint,
+      model: payload.model,
+      toolCount: payload.tools.length,
+      chatOnly: payload.chatOnly,
+    });
+
     Chat(payload)
       .then((response: ChatResponsePayload) => {
         const traceMessages = (response.trace ?? []).map((step) => {
@@ -283,7 +291,8 @@ function App() {
           return {
             id: createId(),
             role,
-            content: `${kindPrefix}${statusPrefix}${titlePrefix}${step.content}`.trim(),
+            content:
+              `${kindPrefix}${statusPrefix}${titlePrefix}${step.content}`.trim(),
             createdAt,
           } satisfies ChatMessage;
         });
@@ -391,9 +400,12 @@ function App() {
       .then((res) => {
         const next = res?.models ?? [];
         setModels(next);
-        if (next.length && !settings.model) {
-          setSettings((prev) => ({ ...prev, model: next[0] }));
-        }
+        setSettings((prev) => {
+          if (next.length > 0 && (!prev.model || !next.includes(prev.model))) {
+            return { ...prev, model: next[0] };
+          }
+          return prev;
+        });
       })
       .catch((err: unknown) => {
         const message =

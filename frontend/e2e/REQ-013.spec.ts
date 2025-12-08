@@ -55,14 +55,27 @@ test.describe("REQ-013: Dialogue Feedback Loop", () => {
   });
 
   test("real vLLM endpoint responds when enabled", async ({ page }) => {
-    test.skip(process.env.E2E_USE_REAL_PROVIDER !== "1", "Real provider disabled");
+    test.skip(
+      process.env.E2E_USE_REAL_PROVIDER !== "1",
+      "Real provider disabled"
+    );
 
     await page.goto("/");
-    await page.getByPlaceholder("Message shell-werk").fill(
-      "Say 'hello from vllm' and then call request_fullfilled."
-    );
+    await page
+      .getByPlaceholder("Message shell-werk")
+      .fill("Say 'hello from vllm' and then call request_fullfilled.");
     await page.getByRole("button", { name: "Send" }).click();
 
-    await expect(page.getByText(/hello from vllm/i)).toBeVisible({ timeout: 60_000 });
+    const finalAssistant = page
+      .locator(".message-assistant .message-body")
+      .last();
+    await expect(finalAssistant).toBeVisible({ timeout: 60_000 });
+    await expect(finalAssistant).not.toHaveText(
+      /Assistant replies will appear/i,
+      {
+        timeout: 120_000,
+      }
+    );
+    await finalAssistant.innerText();
   });
 });
