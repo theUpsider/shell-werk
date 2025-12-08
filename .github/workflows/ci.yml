@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Go + Playwright (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      # Ensure CI uses mocked providers
+      USE_REAL_LLM: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Go tests
+        run: go test ./...
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/yarn.lock
+            frontend/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        if: hashFiles('frontend/package.json') != ''
+        shell: pwsh
+        working-directory: frontend
+        run: |
+          if (Test-Path yarn.lock) { corepack enable; yarn install --frozen-lockfile }
+          elseif (Test-Path pnpm-lock.yaml) { corepack enable; pnpm install --frozen-lockfile }
+          elseif (Test-Path package-lock.json) { npm ci }
+          else { npm install }
+
+      - name: Build frontend (if present)
+        if: hashFiles('frontend/package.json') != ''
+        working-directory: frontend
+        run: npm run build --if-present
+
+      - name: Install Playwright browsers (Linux)
+        if: runner.os == 'Linux' && hashFiles('e2e/**') != ''
+        run: npx playwright install --with-deps
+
+      - name: Install Playwright browsers (Windows)
+        if: runner.os == 'Windows' && hashFiles('e2e/**') != ''
+        run: npx playwright install
+
+      - name: Run Playwright tests
+        if: hashFiles('e2e/**') != ''
+        run: npx playwright test

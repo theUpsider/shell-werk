@@ -1,11 +1,10 @@
 # README
 
+[![CI](https://github.com/theUpsider/shell-werk/actions/workflows/ci.yml/badge.svg)](https://github.com/theUpsider/shell-werk/actions/workflows/ci.yml)
+
 ## About
 
-This is the official Wails React-TS template.
-
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+shell-werk is a Wails (Go) + React app that provides a chat interface for local LLMs with safe tool calling and shell execution. Configure the project via `wails.json`. Docs: https://wails.io/docs/reference/project-config
 
 ## Live Development
 
@@ -17,3 +16,21 @@ to this in your browser, and you can call your Go code from devtools.
 ## Building
 
 To build a redistributable, production mode package, use `wails build`.
+
+## Testing
+
+- Go tests (unit/integration):
+
+  - `go test ./...`
+
+- Playwright end-to-end tests (mocked providers by default):
+
+  - Install Node deps in `frontend` and root as needed
+  - `npm -C frontend ci` ; `npm -C frontend run build`
+  - `npx playwright install --with-deps`
+  - `npx playwright test`
+
+- Real providers locally (optional):
+  - Set `USE_REAL_LLM=1` in your environment to opt in to real Ollama/vLLM during local e2e runs. CI always uses mocks.
+
+Note: The CI workflow should run `go test ./...` and `npx playwright test` on push/PR. The badge above points to `actions/workflows/ci.yml`—adjust if your workflow file uses a different name.
