@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -350,7 +351,13 @@ func (l *dialogueLoop) completionsURL() string {
 }
 
 func (l *dialogueLoop) systemPrompt() string {
-	return "You are shell-werk. When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary."
+	hostOS := runtime.GOOS
+	shellHint := "Shell tool executes commands directly without a wrapping shell; prefer POSIX-friendly commands and paths."
+	if hostOS == "windows" {
+		shellHint = "Shell tool uses PowerShell; prefer PowerShell-friendly commands and paths."
+	}
+
+	return fmt.Sprintf("You are a helpful assistant named shell-werk. Host OS: %s. %s When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary.", hostOS, shellHint)
 }
 
 func parseArguments(raw string) (map[string]any, error) {

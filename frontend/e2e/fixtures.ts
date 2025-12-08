@@ -17,6 +17,32 @@ const realEndpoint =
   process.env.VITE_VLLM_ENDPOINT ||
   "https://vllm-32b.haski.app";
 const realApiKey = process.env.VITE_VLLM_API_KEY || "";
+const hostOS = normalizePlatform(process.platform);
+
+function normalizePlatform(
+  platform: NodeJS.Platform
+): "windows" | "linux" | "darwin" {
+  switch (platform) {
+    case "win32":
+      return "windows";
+    case "darwin":
+      return "darwin";
+    default:
+      return "linux";
+  }
+}
+
+function shellHint(os: string): string {
+  return os === "windows"
+    ? "Shell tool uses PowerShell; prefer PowerShell-friendly commands and paths."
+    : "Shell tool executes commands directly without a wrapping shell; prefer POSIX-friendly commands and paths.";
+}
+
+function buildSystemPrompt(os: string): string {
+  return `You are a helpful assistant named shell-werk. Host OS: ${os}. ${shellHint(
+    os
+  )} When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary.`;
+}
 
 export const test = base.extend({
   page: async ({ page }, use) => {
@@ -69,8 +95,7 @@ export const test = base.extend({
           const tools = buildToolDefinitions(payload.tools ?? []);
           const sys = {
             role: "system",
-            content:
-              "You are shell-werk. Use tools and finalize with request_fullfilled when done.",
+            content: buildSystemPrompt(hostOS),
           };
           const messages: any[] = [
             sys,
