@@ -233,3 +233,91 @@ describe("REQ-002: sidebar and history", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("REQ-003: message visualization and thinking state", () => {
+  it("renders distinct user, assistant, and tool messages", () => {
+    const timestamp = "2024-02-01T00:00:00.000Z";
+    seedSessions([
+      {
+        id: "session-visual",
+        title: "Visual test",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            content: "User says hi",
+            createdAt: timestamp,
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Assistant replies",
+            createdAt: timestamp,
+          },
+          {
+            id: "t1",
+            role: "tool",
+            content: "Tool output",
+            createdAt: timestamp,
+          },
+        ],
+      },
+    ]);
+
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".message-user")).toHaveTextContent(
+      /user says hi/i
+    );
+    expect(container.querySelector(".message-assistant")).toHaveTextContent(
+      /assistant replies/i
+    );
+    expect(container.querySelector(".message-tool")).toHaveTextContent(
+      /tool output/i
+    );
+  });
+
+  it("shows a thinking indicator with bulb and timer until the reply lands", async () => {
+    mockChat.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                message: { role: "assistant", content: "Final answer" },
+                latencyMs: 10,
+              }),
+            1500
+          );
+        })
+    );
+
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(
+      screen.getByPlaceholderText(/message shell-werk/i),
+      "Show thinking"
+    );
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const indicator = await screen.findByRole("status", {
+      name: /thinking indicator/i,
+    });
+    const timer = within(indicator).getByTestId("thinking-timer");
+    expect(timer.textContent).toBe("00:00");
+    expect(within(indicator).getByTestId("idea-bulb")).toBeInTheDocument();
+
+    await screen.findByTestId("thinking-timer");
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    expect(timer.textContent).not.toBe("00:00");
+
+    expect(await screen.findByText(/final answer/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: /thinking indicator/i })
+    ).not.toBeInTheDocument();
+  });
+});

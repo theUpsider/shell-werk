@@ -68,6 +68,15 @@ interface ToolMetadata {
   enabled: boolean;
 }
 
+const formatElapsed = (elapsedMs: number) => {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+};
+
 const STORAGE_KEY = "shellwerk:sessions";
 
 const createId = () =>
@@ -136,6 +145,11 @@ function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [toolError, setToolError] = useState<string | null>(null);
+  const [thinking, setThinking] = useState<{
+    sessionId: string;
+    startedAt: number;
+  } | null>(null);
+  const [thinkingElapsed, setThinkingElapsed] = useState(0);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -204,6 +218,27 @@ function App() {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [activeSession?.messages.length]);
+
+  useEffect(() => {
+    if (!thinking) return;
+    const tick = () =>
+      setThinkingElapsed(Date.now() - (thinking?.startedAt ?? Date.now()));
+
+    tick();
+    const intervalId = window.setInterval(tick, 300);
+
+    return () => {
+      window.clearInterval(intervalId);
+      setThinkingElapsed(0);
+    };
+  }, [thinking]);
+
+  useEffect(() => {
+    if (!thinking || thinking.sessionId !== activeSession?.id) return;
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [thinking, activeSession?.id]);
 
   const updateSession = (
     sessionId: string,
@@ -300,7 +335,7 @@ function App() {
     const assistantPlaceholder: ChatMessage = {
       id: createId(),
       role: "assistant",
-      content: "Assistant replies will appear here once connected.",
+      content: "Assistant is thinking...",
       createdAt: new Date().toISOString(),
     };
 
@@ -321,6 +356,7 @@ function App() {
 
     setDraft("");
     setIsSending(true);
+    setThinking({ sessionId: activeSession.id, startedAt: Date.now() });
     const payload = main.ChatRequest.createFrom({
       sessionId: activeSession.id,
       provider: settings.provider,
@@ -392,7 +428,10 @@ function App() {
         );
         setLastLatencyMs(null);
       })
-      .finally(() => setIsSending(false));
+      .finally(() => {
+        setIsSending(false);
+        setThinking(null);
+      });
   };
 
   const handleEnterKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -601,6 +640,57 @@ function App() {
               <p className="muted">
                 Messages stay local and persist across restarts.
               </p>
+            </div>
+          )}
+
+          {thinking?.sessionId === activeSession?.id && (
+            <div
+              className="message thinking message-assistant"
+              role="status"
+              aria-label="Thinking indicator"
+            >
+              <div
+                className="thinking-icon"
+                aria-hidden="true"
+                data-testid="idea-bulb"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  role="img"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12 2.5c-3 0-5.5 2.43-5.5 5.42 0 1.95 1.08 3.63 2.62 4.57l.38.23v2.13c0 .36.29.65.65.65h3.9c.36 0 .65-.29.65-.65v-2.13l.38-.23c1.54-.94 2.62-2.62 2.62-4.57C17.5 4.93 15 2.5 12 2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
+                  <path
+                    d="M10 19.75h4M10.5 22h3"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M9.75 15h4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+              <div className="thinking-copy">
+                <div className="thinking-row">
+                  <span className="thinking-label">Thinking</span>
+                  <span className="thinking-timer" data-testid="thinking-timer">
+                    {formatElapsed(thinkingElapsed)}
+                  </span>
+                </div>
+                <p className="thinking-hint">
+                  The assistant is working on your request.
+                </p>
+              </div>
             </div>
           )}
         </div>
