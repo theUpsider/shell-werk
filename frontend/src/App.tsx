@@ -100,7 +100,8 @@ function App() {
     if (cached) {
       try {
         const parsed = JSON.parse(cached) as SettingsState;
-        if (parsed?.provider && parsed?.endpoint && parsed?.model) return parsed;
+        if (parsed?.provider && parsed?.endpoint && parsed?.model)
+          return parsed;
       } catch {
         // ignore broken cache
       }
