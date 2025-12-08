@@ -1,7 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import App from "./App";
 import { Chat } from "../wailsjs/go/main/App";
 
@@ -14,11 +17,14 @@ vi.mock("../wailsjs/go/main/App", () => ({
 }));
 
 const STORAGE_KEY = "shellwerk:sessions";
-const mockChat = Chat as unknown as vi.Mock;
+const mockChat = Chat as unknown as Mock;
 
 const seedSessions = (sessions: unknown) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 };
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 beforeEach(() => {
   localStorage.clear();
@@ -40,12 +46,14 @@ describe("REQ-001: chat interface", () => {
 
   it("submits a message on Enter and sends to backend", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    const { container } = render(<App />);
 
     const textbox = screen.getByPlaceholderText(/message shell-werk/i);
     await user.type(textbox, "Hello there{enter}");
 
-    expect(await screen.findByText("Hello there")).toBeInTheDocument();
+    const feed = container.querySelector(".chat-feed") as HTMLDivElement | null;
+    if (!feed) throw new Error("chat feed not found");
+    expect(await within(feed).findByText("Hello there")).toBeInTheDocument();
     expect(mockChat).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Hello there" })
     );
@@ -68,8 +76,50 @@ describe("REQ-001: chat interface", () => {
     );
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    expect(await screen.findByText("Scroll check")).toBeInTheDocument();
+    expect(await within(feed).findByText("Scroll check")).toBeInTheDocument();
     expect(feed.scrollTop).toBe(feed.scrollHeight);
+  });
+
+  it("allows manual scrolling when chat overflow occurs", () => {
+    const { container } = render(<App />);
+
+    const feed = container.querySelector(".chat-feed") as HTMLDivElement;
+    Object.defineProperty(feed, "scrollHeight", {
+      configurable: true,
+      value: 1200,
+    });
+    Object.defineProperty(feed, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+
+    feed.scrollTop = 0;
+    feed.scrollTop = 300;
+
+    expect(feed.scrollTop).toBe(300);
+  });
+
+  it("keeps the composer at the bottom of the chat pane", () => {
+    const { container } = render(<App />);
+    const pane = container.querySelector(".chat-pane");
+    expect(pane).toBeInTheDocument();
+    if (!pane) return;
+
+    const children = Array.from(pane.children);
+    const composer = children.at(-1);
+    const feed = children.find((child) => child.classList.contains("chat-feed"));
+
+    expect(composer?.classList.contains("composer")).toBe(true);
+    expect(feed).toBeDefined();
+    if (!feed || !composer) return;
+
+    expect(children.indexOf(composer)).toBeGreaterThan(children.indexOf(feed));
+  });
+
+  it("allocates majority width to the chat pane via grid template", () => {
+    const cssPath = path.resolve(__dirname, "App.css");
+    const css = readFileSync(cssPath, "utf8");
+    expect(css).toMatch(/grid-template-columns\s*:\s*320px\s+1fr/i);
   });
 });
 
