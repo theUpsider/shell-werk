@@ -4,8 +4,7 @@ const CONFIG_LIST = "Model configurations";
 
 const getPayload = async (page: any) =>
   page.evaluate(
-    () =>
-      (globalThis as { __LAST_CHAT_PAYLOAD__?: any }).__LAST_CHAT_PAYLOAD__
+    () => (globalThis as { __LAST_CHAT_PAYLOAD__?: any }).__LAST_CHAT_PAYLOAD__
   );
 
 test.describe("REQ-009: LLM Provider Configuration", () => {
