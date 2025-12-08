@@ -1,6 +1,7 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Chat } from "../wailsjs/go/main/App";
+import { loadSettings, persistSettings, type SettingsState } from "./settings";
 import "./App.css";
 
 type Role = "user" | "assistant" | "tool";
@@ -20,12 +21,6 @@ interface ChatSession {
   messages: ChatMessage[];
 }
 
-interface SettingsState {
-  provider: string;
-  endpoint: string;
-  model: string;
-}
-
 interface ChatRequestPayload {
   sessionId: string;
   provider: string;
@@ -40,7 +35,6 @@ interface ChatResponsePayload {
 }
 
 const STORAGE_KEY = "shellwerk:sessions";
-const SETTINGS_KEY = "shellwerk:settings";
 
 const createId = () =>
   crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -95,23 +89,9 @@ function App() {
   );
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [settings, setSettings] = useState<SettingsState>(() => {
-    const cached = localStorage.getItem(SETTINGS_KEY);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as SettingsState;
-        if (parsed?.provider && parsed?.endpoint && parsed?.model)
-          return parsed;
-      } catch {
-        // ignore broken cache
-      }
-    }
-    return {
-      provider: "mock",
-      endpoint: "http://localhost:11434",
-      model: "qwen-3",
-    };
-  });
+  const [settings, setSettings] = useState<SettingsState>(() =>
+    loadSettings(globalThis.localStorage)
+  );
   const [isSending, setIsSending] = useState(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
 
@@ -127,7 +107,7 @@ function App() {
   }, [sessions]);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    persistSettings(globalThis.localStorage, settings);
   }, [settings]);
 
   useEffect(() => {
