@@ -175,9 +175,15 @@ function App() {
   );
   const [isSending, setIsSending] = useState(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
-  const [modelsByConfig, setModelsByConfig] = useState<Record<string, string[]>>({});
-  const [modelErrors, setModelErrors] = useState<Record<string, string | null>>({});
-  const [isLoadingModels, setIsLoadingModels] = useState<Record<string, boolean>>({});
+  const [modelsByConfig, setModelsByConfig] = useState<
+    Record<string, string[]>
+  >({});
+  const [modelErrors, setModelErrors] = useState<Record<string, string | null>>(
+    {}
+  );
+  const [isLoadingModels, setIsLoadingModels] = useState<
+    Record<string, boolean>
+  >({});
   const [toolError, setToolError] = useState<string | null>(null);
   const [isToolMenuOpen, setIsToolMenuOpen] = useState(false);
   const [thinking, setThinking] = useState<{
@@ -204,11 +210,17 @@ function App() {
     [settings.hiddenToolsDisabled]
   );
 
+  const webSearchReady = useMemo(
+    () => settings.webSearchApiKey.trim().length > 0,
+    [settings.webSearchApiKey]
+  );
+
   const activeConfig = useMemo(() => {
     if (!settings.configs?.length) return null;
     return (
-      settings.configs.find((config) => config.id === settings.activeConfigId) ??
-      settings.configs[0]
+      settings.configs.find(
+        (config) => config.id === settings.activeConfigId
+      ) ?? settings.configs[0]
     );
   }, [settings.activeConfigId, settings.configs]);
 
@@ -239,10 +251,11 @@ function App() {
     toolCatalog.forEach((tool) => {
       const baseEnabled = tool.enabled;
       const hiddenFlag = !tool.uiVisible && hiddenDisabled.has(tool.id);
-      entries[tool.id] = baseEnabled && !hiddenFlag;
+      const available = tool.id !== "web_search" || webSearchReady;
+      entries[tool.id] = baseEnabled && !hiddenFlag && available;
     });
     return entries;
-  }, [toolCatalog, hiddenDisabled]);
+  }, [toolCatalog, hiddenDisabled, webSearchReady]);
 
   const activeToolChoices = activeSession?.toolChoices ?? toolDefaults;
 
@@ -258,6 +271,8 @@ function App() {
     () => visibleTools.filter((tool) => !activeToolChoices[tool.id]),
     [activeToolChoices, visibleTools]
   );
+  const missingWebSearchKey =
+    visibleTools.some((tool) => tool.id === "web_search") && !webSearchReady;
 
   useEffect(() => {
     GetTools()
@@ -287,6 +302,16 @@ function App() {
       })
     );
   }, [toolCatalog, toolDefaults]);
+
+  useEffect(() => {
+    if (webSearchReady) return;
+    setSessions((prev) =>
+      prev.map((session) => ({
+        ...session,
+        toolChoices: { ...(session.toolChoices ?? {}), web_search: false },
+      }))
+    );
+  }, [webSearchReady]);
 
   useEffect(() => {
     persistSettings(globalThis.localStorage, settings);
@@ -325,7 +350,8 @@ function App() {
 
   useEffect(() => {
     const runtimeAvailable =
-      typeof globalThis !== "undefined" && (globalThis as { runtime?: unknown }).runtime;
+      typeof globalThis !== "undefined" &&
+      (globalThis as { runtime?: unknown }).runtime;
     if (!runtimeAvailable) return;
 
     const disposers = [
@@ -456,6 +482,7 @@ function App() {
       ? []
       : toolCatalog
           .filter((tool) => tool.enabled)
+          .filter((tool) => tool.id !== "web_search" || webSearchReady)
           .filter((tool) => {
             if (!tool.uiVisible) {
               return !hiddenDisabled.has(tool.id);
@@ -514,6 +541,7 @@ function App() {
       history,
       tools: selectedTools,
       chatOnly: settings.chatOnly,
+      webSearchApiKey: settings.webSearchApiKey,
     });
 
     console.log("[Chat Request]", {
@@ -744,6 +772,7 @@ function App() {
 
   const handleToggleTool = (toolId: string) => {
     if (settings.chatOnly) return;
+    if (toolId === "web_search" && !webSearchReady) return;
     setIsToolMenuOpen(false);
     setSessions((prev) =>
       prev.map((session) => {
@@ -789,7 +818,10 @@ function App() {
         setSettings((prev) => {
           const configs = prev.configs.map((item) => {
             if (item.id !== configId) return item;
-            if (next.length > 0 && (!item.model || !next.includes(item.model))) {
+            if (
+              next.length > 0 &&
+              (!item.model || !next.includes(item.model))
+            ) {
               return { ...item, model: next[0] };
             }
             return item;
@@ -864,8 +896,7 @@ function App() {
           </div>
           <div className="chip-row">
             <div className="chip">
-              Config: {activeConfig?.name || "No config"} ·
-              {" "}
+              Config: {activeConfig?.name || "No config"} ·{" "}
               {activeConfig?.provider || "unset"}
             </div>
             <div className={`chip ${isSending ? "chip-warn" : "chip-ghost"}`}>
@@ -1022,7 +1053,10 @@ function App() {
                   onClick={() => handleToggleTool(tool.id)}
                   title={tool.description}
                   aria-label={`Disable ${tool.name}`}
-                  disabled={settings.chatOnly}
+                  disabled={
+                    settings.chatOnly ||
+                    (tool.id === "web_search" && !webSearchReady)
+                  }
                 >
                   <span className="pill-label">{tool.name}</span>
                   <span aria-hidden="true" className="pill-close">
@@ -1050,7 +1084,10 @@ function App() {
                           type="button"
                           role="menuitem"
                           onClick={() => handleToggleTool(tool.id)}
-                          disabled={settings.chatOnly}
+                          disabled={
+                            settings.chatOnly ||
+                            (tool.id === "web_search" && !webSearchReady)
+                          }
                         >
                           Enable {tool.name}
                         </button>
@@ -1062,6 +1099,11 @@ function App() {
                 )}
               </div>
               {toolError && <span className="error-text">{toolError}</span>}
+              {missingWebSearchKey && (
+                <span className="error-text">
+                  Add your Brave Search API key in Settings to enable Web Search.
+                </span>
+              )}
             </div>
             <div className="composer-input-row">
               <textarea
@@ -1117,8 +1159,8 @@ function App() {
                   <div>
                     <p className="section-title">Model configurations</p>
                     <p className="section-hint">
-                      Create cards for each provider + endpoint + model combo and pick one
-                      as the active chat target.
+                      Create cards for each provider + endpoint + model combo
+                      and pick one as the active chat target.
                     </p>
                   </div>
                   <button
@@ -1176,9 +1218,9 @@ function App() {
                               className="ghost"
                               onClick={() => handleDeleteConfig(config.id)}
                               disabled={settings.configs.length <= 1}
-                              aria-label={`Delete ${config.name || `config ${
-                                index + 1
-                              }`}`}
+                              aria-label={`Delete ${
+                                config.name || `config ${index + 1}`
+                              }`}
                             >
                               Delete
                             </button>
@@ -1305,11 +1347,40 @@ function App() {
                   <span>Chat Only mode (disable tools)</span>
                 </label>
               </div>
+              {visibleTools.some((tool) => tool.id === "web_search") && (
+                <div className="modal-section">
+                  <p className="section-title">Web search</p>
+                  <p className="section-hint">
+                    Uses Brave Search. Add your API key to enable this tool.
+                  </p>
+                  <label>
+                    <span className="label-text">Brave API key</span>
+                    <input
+                      type="password"
+                      value={settings.webSearchApiKey}
+                      onChange={(e) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          webSearchApiKey: e.target.value,
+                        }))
+                      }
+                      placeholder="X-Subscription-Token"
+                      autoComplete="off"
+                    />
+                  </label>
+                  {!webSearchReady && (
+                    <p className="muted">
+                      Web Search stays disabled until a valid key is provided.
+                    </p>
+                  )}
+                </div>
+              )}
               {toolCatalog.some((tool) => !tool.uiVisible) && (
                 <div className="modal-section">
                   <p className="section-title">Hidden tools</p>
                   <p className="section-hint">
-                    Toggle global availability for tools that are not shown in the chat UI.
+                    Toggle global availability for tools that are not shown in
+                    the chat UI.
                   </p>
                   <div className="hidden-tools" aria-label="Hidden tools">
                     <div className="hidden-tool-grid">

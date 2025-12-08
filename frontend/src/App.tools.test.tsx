@@ -29,6 +29,13 @@ vi.mock("../wailsjs/go/main/App", () => ({
       enabled: true,
     },
     {
+      id: "web_search",
+      name: "Web Search",
+      description: "Search the web",
+      uiVisible: true,
+      enabled: true,
+    },
+    {
       id: "shell",
       name: "Shell",
       description: "Run shell commands",
@@ -68,6 +75,7 @@ describe("tool toggles", () => {
     expect(mockChat).toHaveBeenCalledWith(
       expect.objectContaining({
         tools: expect.arrayContaining(["browser"]),
+        tools: expect.not.arrayContaining(["web_search"]),
         chatOnly: false,
       })
     );
@@ -103,6 +111,31 @@ describe("tool toggles", () => {
 
     expect(mockChat).toHaveBeenCalledWith(
       expect.not.objectContaining({ tools: expect.arrayContaining(["shell"]) })
+    );
+  });
+
+  it("enables web search when an API key is provided", async () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        ...defaultSettings,
+        chatOnly: false,
+        webSearchApiKey: "token-123",
+      })
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(
+      screen.getByPlaceholderText(/message shell-werk/i),
+      "Search the web"
+    );
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(mockChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: expect.arrayContaining(["web_search", "browser"]),
+      })
     );
   });
 });

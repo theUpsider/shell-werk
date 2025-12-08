@@ -31,6 +31,7 @@ describe("loadSettings", () => {
     expect(settings).toMatchObject({
       chatOnly: true,
       hiddenToolsDisabled: [],
+      webSearchApiKey: "",
     });
     expect(settings.configs[0]).toMatchObject({
       provider: defaultSettings.configs[0].provider,
@@ -62,6 +63,7 @@ describe("loadSettings", () => {
       activeConfigId: "config-two",
       chatOnly: false,
       hiddenToolsDisabled: ["shell"],
+      webSearchApiKey: "brave-key",
     };
     const storage = createMemoryStorage({
       [SETTINGS_KEY]: JSON.stringify(cached),
@@ -81,6 +83,7 @@ describe("loadSettings", () => {
         apiKey: "secret",
         chatOnly: false,
         hiddenToolsDisabled: ["shell"],
+        webSearchApiKey: "",
       }),
     });
 
@@ -137,6 +140,7 @@ describe("persistSettings", () => {
       activeConfigId: "config-one",
       chatOnly: true,
       hiddenToolsDisabled: [],
+      webSearchApiKey: "",
     };
 
     persistSettings(storage, next);

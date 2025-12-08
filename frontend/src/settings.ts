@@ -15,6 +15,7 @@ export interface SettingsState {
   activeConfigId: string;
   chatOnly: boolean;
   hiddenToolsDisabled: string[];
+  webSearchApiKey: string;
 }
 
 export interface SettingsStorage {
@@ -51,6 +52,7 @@ export const defaultSettings: SettingsState = {
   activeConfigId: defaultConfig.id,
   chatOnly: true,
   hiddenToolsDisabled: [],
+  webSearchApiKey: "",
 };
 
 const isStringArray = (value: unknown): value is string[] => {
@@ -84,13 +86,15 @@ const isValidSettings = (value: unknown): value is SettingsState => {
   const activeConfigId = maybe.activeConfigId;
   const chatOnly = maybe.chatOnly;
   const hiddenToolsDisabled = maybe.hiddenToolsDisabled;
+  const webSearchApiKey = maybe.webSearchApiKey;
 
   return (
     Array.isArray(configs) &&
     configs.every(isValidConfig) &&
     typeof activeConfigId === "string" &&
     (typeof chatOnly === "boolean" || chatOnly === undefined) &&
-    (hiddenToolsDisabled === undefined || isStringArray(hiddenToolsDisabled))
+    (hiddenToolsDisabled === undefined || isStringArray(hiddenToolsDisabled)) &&
+    (typeof webSearchApiKey === "string" || webSearchApiKey === undefined)
   );
 };
 
@@ -105,7 +109,9 @@ const normalizeSettings = (raw: SettingsState): SettingsState => {
     configs,
     activeConfigId,
     chatOnly: raw.chatOnly ?? defaultSettings.chatOnly,
-    hiddenToolsDisabled: raw.hiddenToolsDisabled ?? defaultSettings.hiddenToolsDisabled,
+    hiddenToolsDisabled:
+      raw.hiddenToolsDisabled ?? defaultSettings.hiddenToolsDisabled,
+    webSearchApiKey: raw.webSearchApiKey ?? defaultSettings.webSearchApiKey,
   };
 };
 
@@ -116,6 +122,7 @@ type LegacySettings = {
   apiKey?: string;
   chatOnly?: boolean;
   hiddenToolsDisabled?: string[];
+  webSearchApiKey?: string;
 };
 
 const isLegacySettings = (value: unknown): value is LegacySettings => {
@@ -144,6 +151,7 @@ const upgradeLegacySettings = (value: LegacySettings): SettingsState => {
     chatOnly: value.chatOnly ?? defaultSettings.chatOnly,
     hiddenToolsDisabled:
       value.hiddenToolsDisabled ?? defaultSettings.hiddenToolsDisabled,
+    webSearchApiKey: "",
   });
 };
 
