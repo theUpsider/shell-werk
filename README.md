@@ -1,36 +1,19 @@
-# Shell Werk
+# README
 
-[![Tauri Tests](https://github.com/theUpsider/shell-werk/actions/workflows/tauri-tests.yml/badge.svg)](https://github.com/theUpsider/shell-werk/actions/workflows/tauri-tests.yml)
+## About
 
-Shell Werk is a cross-platform desktop chat client built with Tauri v2, React 19, and Vite. It focuses on local LLM workflows, tool calling, and shell execution safeguards while keeping feature coverage traceable back to the requirements in `docs/requirements`.
+This is the official Wails React-TS template.
 
-## Local Development
+You can configure the project by editing `wails.json`. More information about the project settings can be found
+here: https://wails.io/docs/reference/project-config
 
-- `yarn dev` runs the React front end in Vite.
-- `yarn tauri dev` launches the full desktop shell with Rust commands.
+## Live Development
 
-## Testing Strategy
+To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
+server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
+and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
+to this in your browser, and you can call your Go code from devtools.
 
-### Playwright E2E (REQ-007, REQ-008)
+## Building
 
-Each `describe` block maps to a requirement and every `test` matches a single acceptance criterion.
-
-1. Install the browsers once: `npx playwright install --with-deps` (or `yarn playwright install`).
-2. Make sure Ollama is running locally with the `qwen3:4b` model: `ollama run qwen3:4b`.
-3. Execute the suite with `yarn test:e2e` (append `:headed` for a visible browser session).
-
-CI sets `CI=true`, which switches the suite into mock mode so Ollama is not required in pipelines.
-
-### Tauri Integration Tests (REQ-014)
-
-Mocked integration tests live in `src-tauri/tests` and exercise the Rust commands directly, keeping desktop functionality deterministic.
-
-- Run them locally with `yarn test:tauri` (wraps `cargo test` against `src-tauri`).
-- Tests never talk to live LLM endpoints. Instead they rely on in-process HTTP mocks and point the configuration file to a throwaway temp directory.
-- Every test asserts its corresponding acceptance criterion via the helper in `src-tauri/tests/support`, ensuring traceability back to `REQ-###` checkboxes.
-
-#### Configuration Override
-
-Set `SHELL_WERK_LLM_CONFIG_PATH` to point to a writable JSON file if you want to run the app or tests against a transient configuration (the integration suite handles this automatically). When the variable is unset, the app falls back to the OS-specific configuration directory resolved via `directories::ProjectDirs`.
-
-CI runs the mocked Tauri tests on each push and pull request targeting `main` via `.github/workflows/tauri-tests.yml`, so local runs match the pipeline behavior.
+To build a redistributable, production mode package, use `wails build`.
