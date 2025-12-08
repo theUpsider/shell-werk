@@ -103,9 +103,20 @@ pub struct DialogueResponse {
 #[derive(Debug, Serialize, Clone)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum StreamEvent {
-    Answer { request_id: String, delta: String },
-    Done { request_id: String },
-    Error { request_id: String, message: String },
+    Answer {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        delta: String,
+    },
+    Done {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    Error {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1096,5 +1107,20 @@ data: [DONE]
             .collect();
 
         assert_eq!(deltas, "Hello world");
+    }
+
+    #[test]
+    fn stream_event_serializes_with_camel_case_request_id() {
+        let event = StreamEvent::Answer {
+            request_id: "abc-123".into(),
+            delta: "hi".into(),
+        };
+
+        let json = serde_json::to_value(&event).expect("serializes");
+        let obj = json.as_object().expect("event is an object");
+
+        assert_eq!(obj.get("type").and_then(|v| v.as_str()), Some("answer"));
+        assert!(obj.contains_key("requestId"));
+        assert!(!obj.contains_key("request_id"));
     }
 }
