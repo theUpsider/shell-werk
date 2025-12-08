@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
@@ -28,5 +29,9 @@
     "typescript": "^4.6.4",
     "vite": "^3.0.7",
     "vitest": "^0.34.6"
+  },
+  "overrides": {
+    "vfile": "5.3.7",
+    "vfile-message": "3.1.4"
   }
 }

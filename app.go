@@ -15,8 +15,8 @@ type App struct {
 
 // ToolCall represents a request to run a tool.
 type ToolCall struct {
-	ID       string         `json:"id,omitempty"`
-	Type     string         `json:"type"`
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type"`
 	Function ToolCallFunction `json:"function"`
 }
 
@@ -35,11 +35,11 @@ type ChatMessage struct {
 
 // ChatRequest carries the minimal inputs to produce a reply.
 type ChatRequest struct {
-	SessionID string        `json:"sessionId"`
-	Provider  string        `json:"provider"`
-	Endpoint  string        `json:"endpoint"`
-	APIKey    string        `json:"apiKey"`
-	Model     string        `json:"model"`
+	SessionID string           `json:"sessionId"`
+	Provider  string           `json:"provider"`
+	Endpoint  string           `json:"endpoint"`
+	APIKey    string           `json:"apiKey"`
+	Model     string           `json:"model"`
 	Message   string           `json:"message"`
 	History   []ChatMessage    `json:"history"`
 	Tools     []string         `json:"tools"`
@@ -110,9 +110,11 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 		}
 	}
 
-	if req.ChatOnly || len(req.Tools) == 0 {
-		provider := ProviderFor(req.Provider)
-		msg, err := provider.Chat(ctx, req)
+	a.emitThinkingStart(req.SessionID)
+	defer a.emitThinkingEnd(req.SessionID)
+
+	if len(req.Tools) == 0 {
+		msg, err := a.streamChat(ctx, req)
 		if err != nil {
 			return ChatResponse{}, err
 		}

@@ -1,5 +1,7 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { EventsOn } from "../wailsjs/runtime/runtime";
 import {
   Chat,
   GetTools,
@@ -66,6 +68,29 @@ interface ToolMetadata {
   description: string;
   uiVisible: boolean;
   enabled: boolean;
+}
+
+const THINKING_START_EVENT = "thinking:start";
+const THINKING_UPDATE_EVENT = "thinking:update";
+const THINKING_END_EVENT = "thinking:end";
+const ANSWER_UPDATE_EVENT = "answer:update";
+
+const markdownComponents = {
+  a: ({ children, ...props }: React.ComponentProps<"a">) => (
+    <a {...props} target="_blank" rel="noreferrer">
+      {children ?? props.href}
+    </a>
+  ),
+};
+
+interface ThinkingEventPayload {
+  sessionId: string;
+  chunk?: string;
+}
+
+interface AnswerEventPayload {
+  sessionId: string;
+  chunk: string;
 }
 
 const formatElapsed = (elapsedMs: number) => {
@@ -153,6 +178,12 @@ function App() {
     startedAt: number;
   } | null>(null);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
+  const placeholderMap = useRef<
+    Record<string, { id: string; content: string }>
+  >({});
+  const thinkingStreamsRef = useRef<Record<string, string>>({});
+  const activeSessionIdRef = useRef(activeSessionId);
+  const [thinkingStreamText, setThinkingStreamText] = useState("");
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -227,6 +258,11 @@ function App() {
   }, [activeSession?.messages.length]);
 
   useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+    setThinkingStreamText(thinkingStreamsRef.current[activeSessionId] ?? "");
+  }, [activeSessionId]);
+
+  useEffect(() => {
     if (!thinking) return;
     const tick = () =>
       setThinkingElapsed(Date.now() - (thinking?.startedAt ?? Date.now()));
@@ -239,6 +275,50 @@ function App() {
       setThinkingElapsed(0);
     };
   }, [thinking]);
+
+  useEffect(() => {
+    const disposers = [
+      EventsOn(THINKING_START_EVENT, (payload: ThinkingEventPayload) => {
+        if (!payload?.sessionId) return;
+        thinkingStreamsRef.current[payload.sessionId] = "";
+        if (payload.sessionId !== activeSessionIdRef.current) return;
+        setThinking({ sessionId: payload.sessionId, startedAt: Date.now() });
+        setThinkingElapsed(0);
+        setThinkingStreamText("");
+      }),
+      EventsOn(THINKING_UPDATE_EVENT, (payload: ThinkingEventPayload) => {
+        if (!payload?.sessionId || !payload.chunk) return;
+        const next =
+          (thinkingStreamsRef.current[payload.sessionId] ?? "") + payload.chunk;
+        thinkingStreamsRef.current[payload.sessionId] = next;
+        if (payload.sessionId === activeSessionIdRef.current) {
+          setThinkingStreamText(next);
+        }
+      }),
+      EventsOn(THINKING_END_EVENT, (payload: ThinkingEventPayload) => {
+        if (!payload?.sessionId) return;
+        thinkingStreamsRef.current[payload.sessionId] = "";
+        if (payload.sessionId === activeSessionIdRef.current) {
+          setThinking(null);
+          setThinkingStreamText("");
+        }
+      }),
+      EventsOn(ANSWER_UPDATE_EVENT, (payload: AnswerEventPayload) => {
+        if (!payload?.sessionId || !payload.chunk) return;
+        const placeholder = placeholderMap.current[payload.sessionId];
+        if (!placeholder) return;
+        placeholder.content += payload.chunk;
+        applyAssistantContent(
+          payload.sessionId,
+          placeholder.id,
+          placeholder.content,
+          updateSession
+        );
+      }),
+    ];
+
+    return () => disposers.forEach((dispose) => dispose());
+  }, []);
 
   useEffect(() => {
     if (!thinking || thinking.sessionId !== activeSession?.id) return;
@@ -315,6 +395,7 @@ function App() {
   const handleSend = () => {
     const text = draft.trim();
     if (!text || !activeSession || isSending) return;
+    const sessionId = activeSession.id;
 
     const selectedTools = settings.chatOnly
       ? []
@@ -346,7 +427,7 @@ function App() {
       createdAt: new Date().toISOString(),
     };
 
-    updateSession(activeSession.id, (session) => {
+    updateSession(sessionId, (session) => {
       const nextMessages = [
         ...session.messages,
         userMessage,
@@ -361,9 +442,13 @@ function App() {
       };
     });
 
+    placeholderMap.current[sessionId] = {
+      id: assistantPlaceholder.id,
+      content: "",
+    };
     setDraft("");
     setIsSending(true);
-    setThinking({ sessionId: activeSession.id, startedAt: Date.now() });
+    setThinking({ sessionId, startedAt: Date.now() });
     const payload = main.ChatRequest.createFrom({
       sessionId: activeSession.id,
       provider: settings.provider,
@@ -428,7 +513,7 @@ function App() {
       .catch((err: unknown) => {
         const errorText = err instanceof Error ? err.message : "Unknown error";
         applyAssistantContent(
-          activeSession.id,
+          sessionId,
           assistantPlaceholder.id,
           `Failed to reach provider: ${errorText}`,
           updateSession
@@ -438,6 +523,10 @@ function App() {
       .finally(() => {
         setIsSending(false);
         setThinking(null);
+        delete placeholderMap.current[sessionId];
+        if (activeSessionIdRef.current === sessionId) {
+          setThinkingStreamText("");
+        }
       });
   };
 
@@ -680,7 +769,9 @@ function App() {
                     </span>
                   </div>
                   <div className="message-body">
-                    {displayContent}
+                    <ReactMarkdown skipHtml components={markdownComponents}>
+                      {displayContent}
+                    </ReactMarkdown>
                     {message.toolCalls && message.toolCalls.length > 0 && (
                       <div className="tool-calls">
                         {message.toolCalls.map((tc, idx) => (
@@ -758,6 +849,11 @@ function App() {
                 <p className="thinking-hint">
                   The assistant is working on your request.
                 </p>
+                {thinkingStreamText && (
+                  <p className="thinking-stream" aria-live="polite">
+                    {thinkingStreamText}
+                  </p>
+                )}
               </div>
             </div>
           )}

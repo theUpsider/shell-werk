@@ -355,6 +355,17 @@
   color: rgba(255, 255, 255, 0.65);
 }
 
+.thinking-stream {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #c4e5ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 .empty-state {
   text-align: center;
   color: #b5c7d6;
