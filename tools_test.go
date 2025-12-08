@@ -6,8 +6,8 @@ func TestToolRegistryDefaults(t *testing.T) {
 	registry := NewToolRegistry(defaultTools())
 	tools := registry.List()
 
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(tools))
 	}
 	if tools[0].ID != "shell" || tools[1].ID != "browser" {
 		t.Fatalf("unexpected tool ordering: %+v", tools)

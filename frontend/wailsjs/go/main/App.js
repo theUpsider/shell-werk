@@ -18,6 +18,10 @@ export function Models(arg1) {
   return window['go']['main']['App']['Models'](arg1);
 }
 
+export function RunShellCommand(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunShellCommand'](arg1, arg2, arg3);
+}
+
 export function SetToolEnabled(arg1) {
   return window['go']['main']['App']['SetToolEnabled'](arg1);
 }

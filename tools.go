@@ -7,11 +7,26 @@ import (
 
 // ToolMetadata describes a tool and how it should appear in the UI.
 type ToolMetadata struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	UIVisible   bool   `json:"uiVisible"`
-	Enabled     bool   `json:"enabled"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	UIVisible   bool           `json:"uiVisible"`
+	Enabled     bool           `json:"enabled"`
+	Definition  ToolDefinition `json:"-"`
+}
+
+// ToolFunctionDef describes the function signature for the LLM.
+type ToolFunctionDef struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+	Strict      bool           `json:"strict,omitempty"`
+}
+
+// ToolDefinition wraps the function definition for OpenAI-compatible APIs.
+type ToolDefinition struct {
+	Type     string          `json:"type"`
+	Function ToolFunctionDef `json:"function"`
 }
 
 // ToolRegistry stores tool definitions and enabled state.
@@ -55,6 +70,14 @@ func (r *ToolRegistry) List() []ToolMetadata {
 	return out
 }
 
+// Get returns the metadata for a specific tool.
+func (r *ToolRegistry) Get(id string) (ToolMetadata, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	tool, ok := r.tools[id]
+	return tool, ok
+}
+
 // SetEnabled updates the enabled flag for a tool.
 func (r *ToolRegistry) SetEnabled(id string, enabled bool) (ToolMetadata, error) {
 	r.mu.Lock()
@@ -79,6 +102,28 @@ func defaultTools() []ToolMetadata {
 			Description: "Execute shell commands with confirmation.",
 			UIVisible:   false,
 			Enabled:     true,
+			Definition: ToolDefinition{
+				Type: "function",
+				Function: ToolFunctionDef{
+					Name:        "shell",
+					Description: "Run a whitelisted local command (echo, ls/dir, pwd).",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"command": map[string]any{
+								"type":        "string",
+								"description": "Command name (echo, ls, dir, pwd)",
+							},
+							"args": map[string]any{
+								"type":        "array",
+								"items":       map[string]any{"type": "string"},
+								"description": "Arguments for the command",
+							},
+						},
+						"required": []string{"command"},
+					},
+				},
+			},
 		},
 		{
 			ID:          "browser",
@@ -86,6 +131,51 @@ func defaultTools() []ToolMetadata {
 			Description: "Fetch web content for context.",
 			UIVisible:   true,
 			Enabled:     true,
+			Definition: ToolDefinition{
+				Type: "function",
+				Function: ToolFunctionDef{
+					Name:        "browser",
+					Description: "Fetch a URL and return a short text preview.",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"url": map[string]any{
+								"type":        "string",
+								"description": "HTTP or HTTPS URL to fetch",
+							},
+							"maxBytes": map[string]any{
+								"type":        "number",
+								"description": "Optional maximum bytes to read (default 2048)",
+							},
+						},
+						"required": []string{"url"},
+					},
+				},
+			},
+		},
+		{
+			ID:          "request_fullfilled",
+			Name:        "Request Fulfilled",
+			Description: "Signal completion.",
+			UIVisible:   false,
+			Enabled:     true,
+			Definition: ToolDefinition{
+				Type: "function",
+				Function: ToolFunctionDef{
+					Name:        "request_fullfilled",
+					Description: "Signal that the user request is complete and provide the final answer.",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"summary": map[string]any{
+								"type":        "string",
+								"description": "Final answer to present to the user",
+							},
+						},
+						"required": []string{"summary"},
+					},
+				},
+			},
 		},
 	}
 }

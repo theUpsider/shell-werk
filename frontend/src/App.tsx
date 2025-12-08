@@ -1,17 +1,35 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Chat, GetTools, Models } from "../wailsjs/go/main/App";
+import {
+  Chat,
+  GetTools,
+  Models,
+  RunShellCommand,
+} from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 import { loadSettings, persistSettings, type SettingsState } from "./settings";
 import "./App.css";
+import "./tool-calls.css";
 
 type Role = "user" | "assistant" | "tool";
+
+interface ToolCallFunction {
+  name: string;
+  arguments: string;
+}
+
+interface ToolCall {
+  id?: string;
+  type: string;
+  function: ToolCallFunction;
+}
 
 interface ChatMessage {
   id: string;
   role: Role;
   content: string;
   createdAt: string;
+  toolCalls?: ToolCall[];
 }
 
 interface ChatSession {
@@ -24,7 +42,7 @@ interface ChatSession {
 }
 
 interface ChatResponsePayload {
-  message: { role: string; content: string };
+  message: { role: string; content: string; tool_calls?: ToolCall[] };
   latencyMs: number;
   trace?: DialogueTrace[];
 }
@@ -206,6 +224,49 @@ function App() {
       : "New Chat";
   };
 
+  const handleRunTool = async (toolCall: ToolCall) => {
+    if (toolCall.function.name !== "shell") {
+      alert("Only shell tool is implemented for manual execution.");
+      return;
+    }
+
+    let argsObj: any = {};
+    try {
+      argsObj = JSON.parse(toolCall.function.arguments);
+    } catch (e) {
+      console.error("Failed to parse arguments", e);
+      return;
+    }
+
+    const command = argsObj.command;
+    const args = argsObj.args || [];
+
+    if (!command) {
+      alert("Invalid command arguments");
+      return;
+    }
+
+    try {
+      const output = await RunShellCommand(command, args, settings.chatOnly);
+
+      // Append tool result to chat
+      const toolMessage: ChatMessage = {
+        id: createId(),
+        role: "tool",
+        content: output,
+        createdAt: new Date().toISOString(),
+      };
+
+      updateSession(activeSession!.id, (session) => ({
+        ...session,
+        messages: [...session.messages, toolMessage],
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (err) {
+      alert("Error executing command: " + err);
+    }
+  };
+
   const handleSend = () => {
     const text = draft.trim();
     if (!text || !activeSession || isSending) return;
@@ -304,6 +365,7 @@ function App() {
             role: (response.message.role as Role) ?? "assistant",
             content: response.message.content,
             createdAt: now,
+            toolCalls: response.message.tool_calls,
           };
 
           return {
@@ -476,7 +538,26 @@ function App() {
                     {new Date(message.createdAt).toLocaleTimeString()}
                   </span>
                 </div>
-                <div className="message-body">{message.content}</div>
+                <div className="message-body">
+                  {message.content}
+                  {message.toolCalls && message.toolCalls.length > 0 && (
+                    <div className="tool-calls">
+                      {message.toolCalls.map((tc, idx) => (
+                        <div key={idx} className="tool-call-card">
+                          <div className="tool-call-header">
+                            Tool Request: {tc.function.name}
+                          </div>
+                          <pre className="tool-call-args">
+                            {tc.function.arguments}
+                          </pre>
+                          <button onClick={() => handleRunTool(tc)}>
+                            Run Command
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             ))
           ) : (

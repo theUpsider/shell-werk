@@ -32,19 +32,8 @@ type dialogueLoop struct {
 	apiKey   string
 	model    string
 	tools    []string
+	toolDefs []ToolDefinition
 	client   *http.Client
-}
-
-type toolFunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
-	Strict      bool           `json:"strict,omitempty"`
-}
-
-type toolDefinition struct {
-	Type     string          `json:"type"`
-	Function toolFunctionDef `json:"function"`
 }
 
 type toolCallFunction struct {
@@ -70,7 +59,7 @@ type completionRequest struct {
 	Model       string                  `json:"model"`
 	Messages    []chatCompletionMessage `json:"messages"`
 	Stream      bool                    `json:"stream"`
-	Tools       []toolDefinition        `json:"tools,omitempty"`
+	Tools       []ToolDefinition        `json:"tools,omitempty"`
 	ToolChoice  string                  `json:"tool_choice,omitempty"`
 	Temperature float32                 `json:"temperature,omitempty"`
 }
@@ -98,6 +87,7 @@ func newDialogueLoop(req ChatRequest) *dialogueLoop {
 		apiKey:   req.APIKey,
 		model:    req.Model,
 		tools:    req.Tools,
+		toolDefs: req.ToolDefs,
 		client:   makeClient(),
 	}
 }
@@ -106,7 +96,7 @@ func (l *dialogueLoop) run(ctx context.Context, req ChatRequest) (ChatMessage, [
 	trace := []DialogueTrace{}
 	start := time.Now()
 
-	toolDefs := l.buildToolDefinitions()
+	toolDefs := l.toolDefs
 	messages := []chatCompletionMessage{
 		{Role: "system", Content: l.systemPrompt()},
 	}
@@ -220,7 +210,7 @@ func (l *dialogueLoop) run(ctx context.Context, req ChatRequest) (ChatMessage, [
 	return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Request stopped after %s without completion.", elapsed)}, trace, errors.New("dialogue loop exceeded iteration limit")
 }
 
-func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCompletionMessage, tools []toolDefinition) (completionChoice, error) {
+func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCompletionMessage, tools []ToolDefinition) (completionChoice, error) {
 	payload := completionRequest{
 		Model:       l.model,
 		Messages:    messages,
@@ -367,84 +357,6 @@ func (l *dialogueLoop) completionsURL() string {
 
 func (l *dialogueLoop) systemPrompt() string {
 	return "You are shell-werk. When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary."
-}
-
-func (l *dialogueLoop) buildToolDefinitions() []toolDefinition {
-	defs := []toolDefinition{}
-
-	for _, id := range l.tools {
-		switch id {
-		case "browser":
-			defs = append(defs, toolDefinition{
-				Type: "function",
-				Function: toolFunctionDef{
-					Name:        "browser",
-					Description: "Fetch a URL and return a short text preview.",
-					Parameters: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"url": map[string]any{
-								"type":        "string",
-								"description": "HTTP or HTTPS URL to fetch",
-							},
-							"maxBytes": map[string]any{
-								"type":        "number",
-								"description": "Optional maximum bytes to read (default 2048)",
-							},
-						},
-						"required": []string{"url"},
-					},
-					Strict: true,
-				},
-			})
-		case "shell":
-			defs = append(defs, toolDefinition{
-				Type: "function",
-				Function: toolFunctionDef{
-					Name:        "shell",
-					Description: "Run a whitelisted local command (echo, ls/dir, pwd).",
-					Parameters: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"command": map[string]any{
-								"type":        "string",
-								"description": "Command name (echo, ls, dir, pwd)",
-							},
-							"args": map[string]any{
-								"type":        "array",
-								"items":       map[string]any{"type": "string"},
-								"description": "Arguments for the command",
-							},
-						},
-						"required": []string{"command"},
-					},
-					Strict: true,
-				},
-			})
-		}
-	}
-
-	// Always include the termination tool so the model can signal completion.
-	defs = append(defs, toolDefinition{
-		Type: "function",
-		Function: toolFunctionDef{
-			Name:        "request_fullfilled",
-			Description: "Signal that the user request is complete and provide the final answer.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"summary": map[string]any{
-						"type":        "string",
-						"description": "Final answer to present to the user",
-					},
-				},
-				"required": []string{"summary"},
-			},
-			Strict: true,
-		},
-	})
-
-	return defs
 }
 
 func parseArguments(raw string) (map[string]any, error) {

@@ -13,10 +13,24 @@ type App struct {
 	tools *ToolRegistry
 }
 
+// ToolCall represents a request to run a tool.
+type ToolCall struct {
+	ID       string         `json:"id,omitempty"`
+	Type     string         `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallFunction describes the function to call.
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string of arguments
+}
+
 // ChatMessage represents a single message exchanged with the assistant.
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // ChatRequest carries the minimal inputs to produce a reply.
@@ -26,10 +40,11 @@ type ChatRequest struct {
 	Endpoint  string        `json:"endpoint"`
 	APIKey    string        `json:"apiKey"`
 	Model     string        `json:"model"`
-	Message   string        `json:"message"`
-	History   []ChatMessage `json:"history"`
-	Tools     []string      `json:"tools"`
-	ChatOnly  bool          `json:"chatOnly"`
+	Message   string           `json:"message"`
+	History   []ChatMessage    `json:"history"`
+	Tools     []string         `json:"tools"`
+	ChatOnly  bool             `json:"chatOnly"`
+	ToolDefs  []ToolDefinition `json:"-"`
 }
 
 // ChatResponse returns the assistant message content (stubbed for now).
@@ -87,6 +102,13 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	req.History = conversationFromRequest(req)
 	// The latest user turn is now embedded in History; clear Message to avoid double-appending downstream.
 	req.Message = ""
+
+	// Resolve tool definitions
+	for _, id := range req.Tools {
+		if tool, ok := a.tools.Get(id); ok {
+			req.ToolDefs = append(req.ToolDefs, tool.Definition)
+		}
+	}
 
 	if req.ChatOnly || len(req.Tools) == 0 {
 		provider := ProviderFor(req.Provider)
@@ -150,6 +172,15 @@ func (a *App) Models(req ModelsRequest) (ModelsResponse, error) {
 	}
 
 	return ModelsResponse{Models: models}, nil
+}
+
+// RunShellCommand executes a shell command.
+func (a *App) RunShellCommand(command string, args []string, chatOnly bool) (string, error) {
+	if chatOnly {
+		return "", fmt.Errorf("shell execution disabled in chat-only mode")
+	}
+	executor := NewShellExecutor()
+	return executor.Execute(a.ctx, command, args)
 }
 
 // GetTools returns the tool metadata for UI rendering and configuration.

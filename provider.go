@@ -54,18 +54,27 @@ type chatPayload struct {
 	Tools      any           `json:"tools,omitempty"`
 }
 
+type ollamaToolCall struct {
+	Function struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	} `json:"function"`
+}
+
 type ollamaResponse struct {
 	Message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role      string           `json:"role"`
+		Content   string           `json:"content"`
+		ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 	} `json:"message"`
 	Error string `json:"error"`
 }
 
 type openAIChoice struct {
 	Message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role      string     `json:"role"`
+		Content   string     `json:"content"`
+		ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	} `json:"message"`
 }
 
@@ -139,7 +148,7 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 	}
 
 	content := decoded.Message.Content
-	if content == "" {
+	if content == "" && len(decoded.Message.ToolCalls) == 0 {
 		content = "(no content returned)"
 	}
 
@@ -148,7 +157,19 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 		role = "assistant"
 	}
 
-	return ChatMessage{Role: role, Content: content}, nil
+	var toolCalls []ToolCall
+	for _, tc := range decoded.Message.ToolCalls {
+		argsBytes, _ := json.Marshal(tc.Function.Arguments)
+		toolCalls = append(toolCalls, ToolCall{
+			Type: "function",
+			Function: ToolCallFunction{
+				Name:      tc.Function.Name,
+				Arguments: string(argsBytes),
+			},
+		})
+	}
+
+	return ChatMessage{Role: role, Content: content, ToolCalls: toolCalls}, nil
 }
 
 func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, error) {
@@ -163,6 +184,7 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 	// Only request tool selection when tools are actually provided to avoid vLLM 400s.
 	if len(req.Tools) > 0 {
 		payload.ToolChoice = "auto"
+		payload.Tools = req.ToolDefs
 	}
 
 	body, err := json.Marshal(payload)
@@ -201,7 +223,7 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 	}
 
 	content := decoded.Choices[0].Message.Content
-	if content == "" {
+	if content == "" && len(decoded.Choices[0].Message.ToolCalls) == 0 {
 		content = "(no content returned)"
 	}
 	role := decoded.Choices[0].Message.Role
@@ -209,7 +231,7 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 		role = "assistant"
 	}
 
-	return ChatMessage{Role: role, Content: content}, nil
+	return ChatMessage{Role: role, Content: content, ToolCalls: decoded.Choices[0].Message.ToolCalls}, nil
 }
 
 // ProviderFor chooses a provider implementation; defaults to mock.

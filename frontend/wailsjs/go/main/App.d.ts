@@ -10,4 +10,6 @@ export function Greet(arg1:string):Promise<string>;
 
 export function Models(arg1:main.ModelsRequest):Promise<main.ModelsResponse>;
 
+export function RunShellCommand(arg1:string,arg2:Array<string>,arg3:boolean):Promise<string>;
+
 export function SetToolEnabled(arg1:main.SetToolEnabledRequest):Promise<Array<main.ToolMetadata>>;
