@@ -1,4 +1,4 @@
-package main
+package shell
 
 import (
 	"bytes"
@@ -11,16 +11,16 @@ import (
 	"time"
 )
 
-// ShellExecutor handles safe shell command execution.
-type ShellExecutor struct{}
+// Executor handles safe shell command execution.
+type Executor struct{}
 
-// NewShellExecutor creates a new ShellExecutor.
-func NewShellExecutor() *ShellExecutor {
-	return &ShellExecutor{}
+// NewExecutor creates a new Executor.
+func NewExecutor() *Executor {
+	return &Executor{}
 }
 
 // Validate checks if the command is safe to execute.
-func (s *ShellExecutor) Validate(command string, args []string) error {
+func (e *Executor) Validate(command string, args []string) error {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return errors.New("command cannot be empty")
@@ -62,22 +62,16 @@ func (s *ShellExecutor) Validate(command string, args []string) error {
 }
 
 // Execute runs the command and returns the output.
-func (s *ShellExecutor) Execute(ctx context.Context, command string, args []string) (string, error) {
-	if err := s.Validate(command, args); err != nil {
+func (e *Executor) Execute(ctx context.Context, command string, args []string) (string, error) {
+	if err := e.Validate(command, args); err != nil {
 		return "", err
 	}
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		// Use PowerShell on Windows to support built-ins like 'dir' and aliases.
-		// We pass the command and arguments to -Command.
-		// exec.Command will quote arguments as needed, preventing injection of shell operators
-		// into the arguments themselves, but the command string itself is passed as-is to PowerShell's parser
-		// as the first token of the command line.
 		psArgs := append([]string{"-Command", command}, args...)
 		cmd = exec.CommandContext(ctx, "powershell", psArgs...)
 	} else {
-		// Use direct execution on Linux/Mac to avoid shell injection.
 		cmd = exec.CommandContext(ctx, command, args...)
 	}
 

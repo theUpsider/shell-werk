@@ -1,9 +1,9 @@
-package main
+package tools
 
 import "testing"
 
 func TestToolRegistryDefaults(t *testing.T) {
-	registry := NewToolRegistry(defaultTools())
+	registry := NewToolRegistry(DefaultTools())
 	tools := registry.List()
 
 	if len(tools) != 3 {
@@ -20,7 +20,7 @@ func TestToolRegistryDefaults(t *testing.T) {
 }
 
 func TestToolRegistrySetEnabled(t *testing.T) {
-	registry := NewToolRegistry(defaultTools())
+	registry := NewToolRegistry(DefaultTools())
 
 	updated, err := registry.SetEnabled("browser", false)
 	if err != nil {
@@ -35,24 +35,5 @@ func TestToolRegistrySetEnabled(t *testing.T) {
 
 	if _, err := registry.SetEnabled("missing", true); err == nil {
 		t.Fatalf("expected error for unknown tool id")
-	}
-}
-
-func TestAppToolAPIs(t *testing.T) {
-	app := NewApp()
-
-	tools := app.GetTools()
-	if len(tools) == 0 {
-		t.Fatalf("expected default tools to be seeded")
-	}
-
-	if _, err := app.SetToolEnabled(SetToolEnabledRequest{ID: "shell", Enabled: false}); err != nil {
-		t.Fatalf("SetToolEnabled returned error: %v", err)
-	}
-
-	for _, tool := range app.GetTools() {
-		if tool.ID == "shell" && tool.Enabled {
-			t.Fatalf("expected shell to be disabled after SetToolEnabled")
-		}
 	}
 }

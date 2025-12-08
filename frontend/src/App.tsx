@@ -8,7 +8,7 @@ import {
   Models,
   RunShellCommand,
 } from "../wailsjs/go/main/App";
-import { main } from "../wailsjs/go/models";
+import { llm } from "../wailsjs/go/models";
 import { loadSettings, persistSettings, type SettingsState } from "./settings";
 import { ToolTraceMessage } from "./ToolTraceMessage";
 import "./App.css";
@@ -173,6 +173,7 @@ function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [toolError, setToolError] = useState<string | null>(null);
+  const [isToolMenuOpen, setIsToolMenuOpen] = useState(false);
   const [thinking, setThinking] = useState<{
     sessionId: string;
     startedAt: number;
@@ -212,6 +213,19 @@ function App() {
   }, [toolCatalog, hiddenDisabled]);
 
   const activeToolChoices = activeSession?.toolChoices ?? toolDefaults;
+
+  const visibleTools = useMemo(
+    () => toolCatalog.filter((tool) => tool.uiVisible),
+    [toolCatalog]
+  );
+  const enabledVisibleTools = useMemo(
+    () => visibleTools.filter((tool) => !!activeToolChoices[tool.id]),
+    [activeToolChoices, visibleTools]
+  );
+  const disabledVisibleTools = useMemo(
+    () => visibleTools.filter((tool) => !activeToolChoices[tool.id]),
+    [activeToolChoices, visibleTools]
+  );
 
   useEffect(() => {
     GetTools()
@@ -261,6 +275,12 @@ function App() {
     activeSessionIdRef.current = activeSessionId;
     setThinkingStreamText(thinkingStreamsRef.current[activeSessionId] ?? "");
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (settings.chatOnly) {
+      setIsToolMenuOpen(false);
+    }
+  }, [settings.chatOnly]);
 
   useEffect(() => {
     if (!thinking) return;
@@ -449,7 +469,7 @@ function App() {
     setDraft("");
     setIsSending(true);
     setThinking({ sessionId, startedAt: Date.now() });
-    const payload = main.ChatRequest.createFrom({
+    const payload = llm.ChatRequest.createFrom({
       sessionId: activeSession.id,
       provider: settings.provider,
       endpoint: settings.endpoint,
@@ -607,6 +627,7 @@ function App() {
 
   const handleToggleTool = (toolId: string) => {
     if (settings.chatOnly) return;
+    setIsToolMenuOpen(false);
     setSessions((prev) =>
       prev.map((session) => {
         if (session.id !== activeSessionId) return session;
@@ -860,41 +881,88 @@ function App() {
         </div>
 
         <div className="composer" aria-label="Chat input">
-          <div className="tool-toggle-row" aria-label="Tool toggles">
-            {toolCatalog
-              .filter((tool) => tool.uiVisible)
-              .map((tool) => {
-                const isOn = !!activeToolChoices[tool.id];
-                return (
-                  <button
-                    key={tool.id}
-                    type="button"
-                    className={`tool-toggle ${isOn ? "active" : "ghost"}`}
-                    onClick={() => handleToggleTool(tool.id)}
-                    title={tool.description}
-                    aria-pressed={isOn}
-                    disabled={settings.chatOnly}
-                  >
-                    {tool.name}
-                  </button>
-                );
-              })}
-            {toolError && <span className="error-text">{toolError}</span>}
+          <div className="composer-box">
+            <div className="tool-pill-row" aria-label="Tool toggles">
+              {enabledVisibleTools.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className="tool-pill"
+                  onClick={() => handleToggleTool(tool.id)}
+                  title={tool.description}
+                  aria-label={`Disable ${tool.name}`}
+                  disabled={settings.chatOnly}
+                >
+                  <span className="pill-label">{tool.name}</span>
+                  <span aria-hidden="true" className="pill-close">
+                    x
+                  </span>
+                </button>
+              ))}
+              <div className="tool-add-wrapper">
+                <button
+                  type="button"
+                  className="tool-add"
+                  aria-label="Add tools"
+                  aria-expanded={isToolMenuOpen}
+                  onClick={() => setIsToolMenuOpen((open) => !open)}
+                  disabled={settings.chatOnly}
+                >
+                  +
+                </button>
+                {isToolMenuOpen && (
+                  <div className="tool-menu" role="menu">
+                    {disabledVisibleTools.length ? (
+                      disabledVisibleTools.map((tool) => (
+                        <button
+                          key={tool.id}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => handleToggleTool(tool.id)}
+                          disabled={settings.chatOnly}
+                        >
+                          Enable {tool.name}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="tool-menu-empty">All tools enabled</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {toolError && <span className="error-text">{toolError}</span>}
+            </div>
+            <div className="composer-input-row">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleEnterKey}
+                placeholder="Message shell-werk"
+                rows={3}
+              />
+              <button
+                className="send-button"
+                onClick={handleSend}
+                disabled={!draft.trim()}
+                aria-label="Send"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4.5 12L5.5 11L17 5.5C17.6 5.2 18.3 5.8 18 6.4L13.5 18.5C13.2 19.1 12.3 19.1 12 18.5L10.2 14.6C10 14.2 10.3 13.7 10.8 13.7H17"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={handleEnterKey}
-            placeholder="Message shell-werk"
-            rows={3}
-          />
-          <button
-            className="primary"
-            onClick={handleSend}
-            disabled={!draft.trim()}
-          >
-            Send
-          </button>
         </div>
       </main>
 

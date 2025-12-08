@@ -1,4 +1,4 @@
-package main
+package tools
 
 import (
 	"fmt"
@@ -93,8 +93,8 @@ func (r *ToolRegistry) SetEnabled(id string, enabled bool) (ToolMetadata, error)
 	return tool, nil
 }
 
-// defaultTools returns the built-in tool set and their UI visibility hints.
-func defaultTools() []ToolMetadata {
+// DefaultTools returns the built-in tool set and their UI visibility hints.
+func DefaultTools() []ToolMetadata {
 	return []ToolMetadata{
 		{
 			ID:          "shell",
@@ -178,4 +178,10 @@ func defaultTools() []ToolMetadata {
 			},
 		},
 	}
+}
+
+// SetToolEnabledRequest toggles a tool's enabled state.
+type SetToolEnabledRequest struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
 }

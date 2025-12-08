@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"context"
@@ -17,8 +17,8 @@ func TestNormalizeBase(t *testing.T) {
 	}
 
 	for input, expected := range cases {
-		if got := normalizeBase(input); got != expected {
-			t.Errorf("normalizeBase(%q) = %q, want %q", input, got, expected)
+		if got := NormalizeBase(input); got != expected {
+			t.Errorf("NormalizeBase(%q) = %q, want %q", input, got, expected)
 		}
 	}
 }

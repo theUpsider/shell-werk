@@ -1,4 +1,4 @@
-export namespace main {
+export namespace llm {
 	
 	export class ToolCallFunction {
 	    name: string;
@@ -234,6 +234,12 @@ export namespace main {
 	        this.models = source["models"];
 	    }
 	}
+	
+
+}
+
+export namespace tools {
+	
 	export class SetToolEnabledRequest {
 	    id: string;
 	    enabled: boolean;
@@ -248,8 +254,6 @@ export namespace main {
 	        this.enabled = source["enabled"];
 	    }
 	}
-	
-	
 	export class ToolFunctionDef {
 	    name: string;
 	    description: string;

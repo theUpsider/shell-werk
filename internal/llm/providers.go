@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"shell-werk/internal/tools"
 )
 
 // ChatProvider defines minimal chat capability.
@@ -21,7 +23,7 @@ type ChatProvider interface {
 type MockProvider struct{}
 
 func (m MockProvider) Chat(_ context.Context, req ChatRequest) (ChatMessage, error) {
-	conversation := conversationFromRequest(req)
+	conversation := ConversationFromRequest(req)
 
 	// Use the latest user turn for deterministic echoing.
 	latest := req.Message
@@ -47,11 +49,11 @@ type VLLMProvider struct {
 }
 
 type chatPayload struct {
-	Model      string        `json:"model"`
-	Messages   []ChatMessage `json:"messages"`
-	Stream     bool          `json:"stream"`
-	ToolChoice string        `json:"tool_choice,omitempty"`
-	Tools      any           `json:"tools,omitempty"`
+	Model      string                 `json:"model"`
+	Messages   []ChatMessage          `json:"messages"`
+	Stream     bool                   `json:"stream"`
+	ToolChoice string                 `json:"tool_choice,omitempty"`
+	Tools      []tools.ToolDefinition `json:"tools,omitempty"`
 }
 
 type ollamaToolCall struct {
@@ -97,20 +99,8 @@ type vllmModelsResponse struct {
 	} `json:"data"`
 }
 
-func makeClient() *http.Client {
-	return &http.Client{Timeout: 60 * time.Second}
-}
-
-func normalizeBase(endpoint string) string {
-	trimmed := strings.TrimSuffix(endpoint, "/")
-	if trimmed == "" {
-		return endpoint
-	}
-	return trimmed
-}
-
 func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, error) {
-	messages := conversationFromRequest(req)
+	messages := ConversationFromRequest(req)
 
 	payload := chatPayload{
 		Model:    req.Model,
@@ -123,7 +113,7 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 		return ChatMessage{}, err
 	}
 
-	url := normalizeBase(req.Endpoint) + "/api/chat"
+	url := NormalizeBase(req.Endpoint) + "/api/chat"
 	log.Printf("[%s] Sending Ollama request to %s with model %s", time.Now().Format(time.RFC3339), url, req.Model)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -173,7 +163,7 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 }
 
 func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, error) {
-	messages := conversationFromRequest(req)
+	messages := ConversationFromRequest(req)
 
 	payload := chatPayload{
 		Model:    req.Model,
@@ -192,7 +182,7 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 		return ChatMessage{}, err
 	}
 
-	url := normalizeBase(req.Endpoint) + "/v1/chat/completions"
+	url := NormalizeBase(req.Endpoint) + "/v1/chat/completions"
 	log.Printf("[%s] Sending VLLM request to %s with model %s", time.Now().Format(time.RFC3339), url, req.Model)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -240,22 +230,22 @@ func ProviderFor(name string) ChatProvider {
 	case "mock":
 		return MockProvider{}
 	case "ollama":
-		return OllamaProvider{client: makeClient()}
+		return OllamaProvider{client: MakeClient()}
 	case "vllm":
-		return VLLMProvider{client: makeClient()}
+		return VLLMProvider{client: MakeClient()}
 	default:
 		return MockProvider{}
 	}
 }
 
 // ListModels returns available model identifiers for the given provider and endpoint.
-// The HTTP client can be injected for tests; makeClient is used when nil.
+// The HTTP client can be injected for tests; MakeClient is used when nil.
 func ListModels(ctx context.Context, provider, endpoint, apiKey string, client *http.Client) ([]string, error) {
 	if client == nil {
-		client = makeClient()
+		client = MakeClient()
 	}
 
-	base := normalizeBase(endpoint)
+	base := NormalizeBase(endpoint)
 
 	switch strings.ToLower(provider) {
 	case "ollama":

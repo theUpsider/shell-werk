@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bytes"
@@ -12,19 +12,10 @@ import (
 	"runtime"
 	"strings"
 	"time"
-)
 
-// DialogueTrace captures intermediate steps in the dialogue feedback loop so the
-// frontend can render partial tool progress. Each entry is ordered chronologically.
-type DialogueTrace struct {
-	ID        string    `json:"id"`
-	Role      string    `json:"role"`
-	Kind      string    `json:"kind"`
-	Title     string    `json:"title,omitempty"`
-	Content   string    `json:"content"`
-	Status    string    `json:"status,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-}
+	"shell-werk/internal/shell"
+	"shell-werk/internal/tools"
+)
 
 type dialogueLoop struct {
 	provider string
@@ -32,55 +23,11 @@ type dialogueLoop struct {
 	apiKey   string
 	model    string
 	tools    []string
-	toolDefs []ToolDefinition
+	toolDefs []tools.ToolDefinition
 	client   *http.Client
 }
 
-type toolCallFunction struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-type chatToolCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function toolCallFunction `json:"function"`
-}
-
-type chatCompletionMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	Name       string         `json:"name,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-}
-
-type completionRequest struct {
-	Model       string                  `json:"model"`
-	Messages    []chatCompletionMessage `json:"messages"`
-	Stream      bool                    `json:"stream"`
-	Tools       []ToolDefinition        `json:"tools,omitempty"`
-	ToolChoice  string                  `json:"tool_choice,omitempty"`
-	Temperature float32                 `json:"temperature,omitempty"`
-}
-
-type completionChoice struct {
-	Message struct {
-		Role      string         `json:"role"`
-		Content   string         `json:"content"`
-		ToolCalls []chatToolCall `json:"tool_calls,omitempty"`
-	} `json:"message"`
-	FinishReason string `json:"finish_reason"`
-}
-
-type completionResponse struct {
-	Choices []completionChoice `json:"choices"`
-	Error   struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-func newDialogueLoop(req ChatRequest) *dialogueLoop {
+func NewDialogueLoop(req ChatRequest) *dialogueLoop {
 	return &dialogueLoop{
 		provider: strings.ToLower(req.Provider),
 		endpoint: req.Endpoint,
@@ -88,11 +35,11 @@ func newDialogueLoop(req ChatRequest) *dialogueLoop {
 		model:    req.Model,
 		tools:    req.Tools,
 		toolDefs: req.ToolDefs,
-		client:   makeClient(),
+		client:   MakeClient(),
 	}
 }
 
-func (l *dialogueLoop) run(ctx context.Context, req ChatRequest) (ChatMessage, []DialogueTrace, error) {
+func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, []DialogueTrace, error) {
 	trace := []DialogueTrace{}
 	start := time.Now()
 
@@ -101,7 +48,7 @@ func (l *dialogueLoop) run(ctx context.Context, req ChatRequest) (ChatMessage, [
 		{Role: "system", Content: l.systemPrompt()},
 	}
 
-	for _, msg := range conversationFromRequest(req) {
+	for _, msg := range ConversationFromRequest(req) {
 		messages = append(messages, chatCompletionMessage{Role: msg.Role, Content: msg.Content})
 	}
 
@@ -210,7 +157,7 @@ func (l *dialogueLoop) run(ctx context.Context, req ChatRequest) (ChatMessage, [
 	return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Request stopped after %s without completion.", elapsed)}, trace, errors.New("dialogue loop exceeded iteration limit")
 }
 
-func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCompletionMessage, tools []ToolDefinition) (completionChoice, error) {
+func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCompletionMessage, tools []tools.ToolDefinition) (completionChoice, error) {
 	payload := completionRequest{
 		Model:       l.model,
 		Messages:    messages,
@@ -325,12 +272,9 @@ func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (stri
 		cmdArgs = append(cmdArgs, rawArgs...)
 	}
 
-	executor := NewShellExecutor()
+	executor := shell.NewExecutor()
 	output, err := executor.Execute(ctx, cmdName, cmdArgs)
 	if err != nil {
-		// If Execute returns an error (validation error), return it.
-		// Note: Execute returns (output, nil) even for command failure (with Error: ... in output).
-		// So err here is likely validation error.
 		return fmt.Sprintf("Validation error: %v", err), "error"
 	}
 
@@ -341,7 +285,7 @@ func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (stri
 }
 
 func (l *dialogueLoop) completionsURL() string {
-	base := normalizeBase(l.endpoint)
+	base := NormalizeBase(l.endpoint)
 	switch l.provider {
 	case "ollama":
 		return base + "/api/chat"
@@ -359,39 +303,3 @@ func (l *dialogueLoop) systemPrompt() string {
 
 	return fmt.Sprintf("You are shell-werk. Host OS: %s. %s When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary.", hostOS, shellHint)
 }
-
-func parseArguments(raw string) (map[string]any, error) {
-	if strings.TrimSpace(raw) == "" {
-		return map[string]any{}, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func contentFromRequestFulfilled(args map[string]any, fallback string) string {
-	if val, ok := args["summary"].(string); ok && strings.TrimSpace(val) != "" {
-		return val
-	}
-	if strings.TrimSpace(fallback) != "" {
-		return fallback
-	}
-	return "Request marked complete."
-}
-
-func truncate(text string, max int) string {
-	if len(text) <= max {
-		return text
-	}
-	if max <= 3 {
-		return text[:max]
-	}
-	return text[:max-3] + "..."
-}
-
-func newTraceID() string {
-	return fmt.Sprintf("trace-%d", time.Now().UnixNano())
-}
-
