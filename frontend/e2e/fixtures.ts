@@ -4,6 +4,7 @@ declare global {
   interface Window {
     __E2E_PROVIDER_MODE?: "mock" | "real";
     go?: Record<string, unknown>;
+    __LAST_CHAT_PAYLOAD__?: unknown;
   }
 }
 
@@ -22,9 +23,28 @@ export const test = base.extend({
         globalThis.go = {
           main: {
             App: {
-              Chat: (payload: { message: string }) =>
-                Promise.resolve(respond(`Stubbed: ${payload.message}`)),
+              Chat: (payload: { message: string }) => {
+                globalThis.__LAST_CHAT_PAYLOAD__ = payload;
+                return Promise.resolve(respond(`Stubbed: ${payload.message}`));
+              },
               Models: () => Promise.resolve({ models: ["mock-model"] }),
+              GetTools: () =>
+                Promise.resolve([
+                  {
+                    id: "browser",
+                    name: "Browser",
+                    description: "Fetch web content for context.",
+                    uiVisible: true,
+                    enabled: true,
+                  },
+                  {
+                    id: "shell",
+                    name: "Shell",
+                    description: "Run shell commands",
+                    uiVisible: false,
+                    enabled: true,
+                  },
+                ]),
               Greet: (name: string) => Promise.resolve(`Hello ${name}`),
             },
           },

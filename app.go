@@ -8,7 +8,8 @@ import (
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx   context.Context
+	tools *ToolRegistry
 }
 
 // ChatMessage represents a single message exchanged with the assistant.
@@ -19,18 +20,26 @@ type ChatMessage struct {
 
 // ChatRequest carries the minimal inputs to produce a reply.
 type ChatRequest struct {
-	SessionID string `json:"sessionId"`
-	Provider  string `json:"provider"`
-	Endpoint  string `json:"endpoint"`
-	APIKey    string `json:"apiKey"`
-	Model     string `json:"model"`
-	Message   string `json:"message"`
+	SessionID string   `json:"sessionId"`
+	Provider  string   `json:"provider"`
+	Endpoint  string   `json:"endpoint"`
+	APIKey    string   `json:"apiKey"`
+	Model     string   `json:"model"`
+	Message   string   `json:"message"`
+	Tools     []string `json:"tools"`
+	ChatOnly  bool     `json:"chatOnly"`
 }
 
 // ChatResponse returns the assistant message content (stubbed for now).
 type ChatResponse struct {
 	Message   ChatMessage `json:"message"`
 	LatencyMs int64       `json:"latencyMs"`
+}
+
+// SetToolEnabledRequest toggles a tool's enabled state.
+type SetToolEnabledRequest struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
 }
 
 // ModelsRequest carries provider configuration to list available models.
@@ -47,7 +56,7 @@ type ModelsResponse struct {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{tools: NewToolRegistry(defaultTools())}
 }
 
 // startup is called when the app starts. The context is saved
@@ -84,4 +93,18 @@ func (a *App) Models(req ModelsRequest) (ModelsResponse, error) {
 	}
 
 	return ModelsResponse{Models: models}, nil
+}
+
+// GetTools returns the tool metadata for UI rendering and configuration.
+func (a *App) GetTools() []ToolMetadata {
+	return a.tools.List()
+}
+
+// SetToolEnabled flips the enabled flag for a tool and returns the updated list.
+func (a *App) SetToolEnabled(req SetToolEnabledRequest) ([]ToolMetadata, error) {
+	if _, err := a.tools.SetEnabled(req.ID, req.Enabled); err != nil {
+		return nil, err
+	}
+
+	return a.tools.List(), nil
 }

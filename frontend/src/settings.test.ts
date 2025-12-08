@@ -35,6 +35,8 @@ describe("loadSettings", () => {
       endpoint: "https://vllm.internal",
       model: "mistral:7b",
       apiKey: "abc123",
+      chatOnly: false,
+      hiddenToolsDisabled: ["shell"],
     };
     const storage = createMemoryStorage({
       [SETTINGS_KEY]: JSON.stringify(cached),
@@ -69,6 +71,8 @@ describe("persistSettings", () => {
       endpoint: "http://localhost:11434",
       model: "llama3",
       apiKey: "secret",
+      chatOnly: true,
+      hiddenToolsDisabled: [],
     };
 
     persistSettings(storage, next);

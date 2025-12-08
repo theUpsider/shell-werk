@@ -22,6 +22,15 @@ vi.mock("../wailsjs/go/main/App", () => ({
     latencyMs: 2,
   }),
   Models: vi.fn().mockResolvedValue({ models: ["llama3"] }),
+  GetTools: vi.fn().mockResolvedValue([
+    {
+      id: "browser",
+      name: "Browser",
+      description: "Fetch web content for context.",
+      uiVisible: true,
+      enabled: true,
+    },
+  ]),
 }));
 
 const STORAGE_KEY = "shellwerk:sessions";

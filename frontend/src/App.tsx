@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Chat, Models } from "../wailsjs/go/main/App";
+import { Chat, GetTools, Models } from "../wailsjs/go/main/App";
 import { loadSettings, persistSettings, type SettingsState } from "./settings";
 import "./App.css";
 
@@ -19,6 +19,7 @@ interface ChatSession {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  toolChoices: Record<string, boolean>;
 }
 
 interface ChatRequestPayload {
@@ -28,6 +29,8 @@ interface ChatRequestPayload {
   apiKey: string;
   model: string;
   message: string;
+  tools: string[];
+  chatOnly: boolean;
 }
 
 interface ChatResponsePayload {
@@ -35,12 +38,22 @@ interface ChatResponsePayload {
   latencyMs: number;
 }
 
+interface ToolMetadata {
+  id: string;
+  name: string;
+  description: string;
+  uiVisible: boolean;
+  enabled: boolean;
+}
+
 const STORAGE_KEY = "shellwerk:sessions";
 
 const createId = () =>
   crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
 
-const createEmptySession = (): ChatSession => {
+const createEmptySession = (
+  toolDefaults: Record<string, boolean>
+): ChatSession => {
   const timestamp = new Date().toISOString();
   return {
     id: createId(),
@@ -48,6 +61,7 @@ const createEmptySession = (): ChatSession => {
     createdAt: timestamp,
     updatedAt: timestamp,
     messages: [],
+    toolChoices: { ...toolDefaults },
   };
 };
 
@@ -70,6 +84,7 @@ const applyAssistantContent = (
 };
 
 function App() {
+  const [toolCatalog, setToolCatalog] = useState<ToolMetadata[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (cached) {
@@ -82,7 +97,7 @@ function App() {
         // ignore broken cache
       }
     }
-    return [createEmptySession()];
+    return [createEmptySession({})];
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string>(
@@ -98,6 +113,7 @@ function App() {
   const [models, setModels] = useState<string[]>([]);
   const [modelError, setModelError] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [toolError, setToolError] = useState<string | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -106,9 +122,51 @@ function App() {
     [activeSessionId, sessions]
   );
 
+  const hiddenDisabled = useMemo(
+    () => new Set(settings.hiddenToolsDisabled ?? []),
+    [settings.hiddenToolsDisabled]
+  );
+
+  const toolDefaults = useMemo(() => {
+    const entries: Record<string, boolean> = {};
+    toolCatalog.forEach((tool) => {
+      const baseEnabled = tool.enabled;
+      const hiddenFlag = !tool.uiVisible && hiddenDisabled.has(tool.id);
+      entries[tool.id] = baseEnabled && !hiddenFlag;
+    });
+    return entries;
+  }, [toolCatalog, hiddenDisabled]);
+
+  const activeToolChoices = activeSession?.toolChoices ?? toolDefaults;
+
+  useEffect(() => {
+    GetTools()
+      .then((tools) => {
+        setToolCatalog(tools ?? []);
+      })
+      .catch((err: unknown) => {
+        const message =
+          err instanceof Error ? err.message : "Failed to load tools";
+        setToolError(message);
+      });
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
+
+  useEffect(() => {
+    if (!toolCatalog.length) return;
+    setSessions((prev) =>
+      prev.map((session) => {
+        const merged: Record<string, boolean> = {
+          ...toolDefaults,
+          ...session.toolChoices,
+        };
+        return { ...session, toolChoices: merged };
+      })
+    );
+  }, [toolCatalog, toolDefaults]);
 
   useEffect(() => {
     persistSettings(globalThis.localStorage, settings);
@@ -189,6 +247,18 @@ function App() {
       apiKey: settings.apiKey,
       model: settings.model,
       message: text,
+      tools: settings.chatOnly
+        ? []
+        : toolCatalog
+            .filter((tool) => tool.enabled)
+            .filter((tool) => {
+              if (!tool.uiVisible) {
+                return !hiddenDisabled.has(tool.id);
+              }
+              return !!(activeSession.toolChoices ?? toolDefaults)[tool.id];
+            })
+            .map((tool) => tool.id),
+      chatOnly: settings.chatOnly,
     };
 
     Chat(payload)
@@ -222,7 +292,7 @@ function App() {
   };
 
   const handleNewChat = () => {
-    const next = createEmptySession();
+    const next = createEmptySession(toolDefaults);
     setSessions((prev) => [next, ...prev]);
     setActiveSessionId(next.id);
   };
@@ -238,6 +308,38 @@ function App() {
 
   const handleSettingsChange = (key: keyof SettingsState, value: string) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleToggleChatOnly = (checked: boolean) => {
+    setSettings((prev) => ({ ...prev, chatOnly: checked }));
+  };
+
+  const handleToggleTool = (toolId: string) => {
+    if (settings.chatOnly) return;
+    setSessions((prev) =>
+      prev.map((session) => {
+        if (session.id !== activeSessionId) return session;
+        const next = { ...(session.toolChoices ?? toolDefaults) };
+        next[toolId] = !next[toolId];
+        return {
+          ...session,
+          toolChoices: next,
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+  };
+
+  const handleToggleHiddenTool = (toolId: string) => {
+    setSettings((prev) => {
+      const disabled = new Set(prev.hiddenToolsDisabled ?? []);
+      if (disabled.has(toolId)) {
+        disabled.delete(toolId);
+      } else {
+        disabled.add(toolId);
+      }
+      return { ...prev, hiddenToolsDisabled: Array.from(disabled) };
+    });
   };
 
   const handleLoadModels = () => {
@@ -341,6 +443,27 @@ function App() {
         </div>
 
         <div className="composer" aria-label="Chat input">
+          <div className="tool-toggle-row" aria-label="Tool toggles">
+            {toolCatalog
+              .filter((tool) => tool.uiVisible)
+              .map((tool) => {
+                const isOn = !!activeToolChoices[tool.id];
+                return (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    className={`tool-toggle ${isOn ? "active" : "ghost"}`}
+                    onClick={() => handleToggleTool(tool.id)}
+                    title={tool.description}
+                    aria-pressed={isOn}
+                    disabled={settings.chatOnly}
+                  >
+                    {tool.name}
+                  </button>
+                );
+              })}
+            {toolError && <span className="error-text">{toolError}</span>}
+          </div>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -454,6 +577,44 @@ function App() {
               <p className="muted">
                 Full provider wiring coming in later milestones.
               </p>
+              <label className="inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.chatOnly}
+                  onChange={(e) => handleToggleChatOnly(e.target.checked)}
+                />
+                <span>Chat Only mode (disable tools)</span>
+              </label>
+              {toolCatalog.some((tool) => !tool.uiVisible) && (
+                <div className="hidden-tools" aria-label="Hidden tools">
+                  <p className="label-text">
+                    Hidden tools (global enable/disable)
+                  </p>
+                  <div className="hidden-tool-grid">
+                    {toolCatalog
+                      .filter((tool) => !tool.uiVisible)
+                      .map((tool) => {
+                        const enabled = !hiddenDisabled.has(tool.id);
+                        return (
+                          <label key={tool.id} className="inline-toggle">
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={() => handleToggleHiddenTool(tool.id)}
+                            />
+                            <span>
+                              {tool.name} (hidden tool)
+                              <span className="muted">
+                                {" "}
+                                — {tool.description}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
               <div className="modal-actions">
                 <button
                   type="button"

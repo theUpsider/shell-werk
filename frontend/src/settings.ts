@@ -3,6 +3,8 @@ export interface SettingsState {
   endpoint: string;
   model: string;
   apiKey: string;
+  chatOnly: boolean;
+  hiddenToolsDisabled: string[];
 }
 
 export interface SettingsStorage {
@@ -17,6 +19,14 @@ export const defaultSettings: SettingsState = {
   endpoint: "http://localhost:11434",
   model: "qwen-3",
   apiKey: "",
+  chatOnly: true,
+  hiddenToolsDisabled: [],
+};
+
+const isStringArray = (value: unknown): value is string[] => {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
 };
 
 const isValidSettings = (value: unknown): value is SettingsState => {
@@ -26,6 +36,8 @@ const isValidSettings = (value: unknown): value is SettingsState => {
   const endpoint = maybe.endpoint;
   const model = maybe.model;
   const apiKey = maybe.apiKey;
+  const chatOnly = maybe.chatOnly;
+  const hiddenToolsDisabled = maybe.hiddenToolsDisabled;
 
   return (
     typeof provider === "string" &&
@@ -34,7 +46,9 @@ const isValidSettings = (value: unknown): value is SettingsState => {
     endpoint.trim() !== "" &&
     typeof model === "string" &&
     model.trim() !== "" &&
-    (typeof apiKey === "string" || apiKey === undefined)
+    (typeof apiKey === "string" || apiKey === undefined) &&
+    (typeof chatOnly === "boolean" || chatOnly === undefined) &&
+    (hiddenToolsDisabled === undefined || isStringArray(hiddenToolsDisabled))
   );
 };
 
@@ -45,7 +59,13 @@ export function loadSettings(storage: SettingsStorage): SettingsState {
   try {
     const parsed = JSON.parse(cached);
     if (isValidSettings(parsed)) {
-      return { ...parsed, apiKey: parsed.apiKey ?? "" };
+      return {
+        ...parsed,
+        apiKey: parsed.apiKey ?? "",
+        chatOnly: parsed.chatOnly ?? defaultSettings.chatOnly,
+        hiddenToolsDisabled:
+          parsed.hiddenToolsDisabled ?? defaultSettings.hiddenToolsDisabled,
+      };
     }
   } catch {
     // ignore broken cache and fall back to defaults
