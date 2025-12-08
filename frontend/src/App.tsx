@@ -136,7 +136,9 @@ function App() {
   );
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [pendingDeletionId, setPendingDeletionId] = useState<string | null>(null);
+  const [pendingDeletionId, setPendingDeletionId] = useState<string | null>(
+    null
+  );
   const [settings, setSettings] = useState<SettingsState>(() =>
     loadSettings(globalThis.localStorage)
   );
@@ -479,8 +481,7 @@ function App() {
       if (activeSessionId === targetId) {
         const nextActive = [...remaining].sort(
           (a, b) =>
-            new Date(b.updatedAt).getTime() -
-            new Date(a.updatedAt).getTime()
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         )[0];
         setActiveSessionId(nextActive.id);
       }
@@ -970,11 +971,10 @@ function App() {
               </button>
             </div>
             <div className="modal-body">
-              <p
-                id="delete-dialog-description"
-                className="warning-text"
-              >
-                Deleting <strong>{pendingDeletionSession.title || "this chat"}</strong> is permanent and cannot be undone.
+              <p id="delete-dialog-description" className="warning-text">
+                Deleting{" "}
+                <strong>{pendingDeletionSession.title || "this chat"}</strong>{" "}
+                is permanent and cannot be undone.
               </p>
             </div>
             <div className="modal-actions">
