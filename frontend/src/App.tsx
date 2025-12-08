@@ -1,28 +1,326 @@
-import {useState} from 'react';
-import logo from './assets/images/logo-universal.png';
-import './App.css';
-import {Greet} from "../wailsjs/go/main/App";
+import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import "./App.css";
 
-function App() {
-    const [resultText, setResultText] = useState("Please enter your name below 👇");
-    const [name, setName] = useState('');
-    const updateName = (e: any) => setName(e.target.value);
-    const updateResultText = (result: string) => setResultText(result);
+type Role = "user" | "assistant" | "tool";
 
-    function greet() {
-        Greet(name).then(updateResultText);
-    }
-
-    return (
-        <div id="App">
-            <img src={logo} id="logo" alt="logo"/>
-            <div id="result" className="result">{resultText}</div>
-            <div id="input" className="input-box">
-                <input id="name" className="input" onChange={updateName} autoComplete="off" name="input" type="text"/>
-                <button className="btn" onClick={greet}>Greet</button>
-            </div>
-        </div>
-    )
+interface ChatMessage {
+  id: string;
+  role: Role;
+  content: string;
+  createdAt: string;
 }
 
-export default App
+interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
+
+interface SettingsState {
+  provider: string;
+  endpoint: string;
+  model: string;
+}
+
+const STORAGE_KEY = "shellwerk:sessions";
+
+const createId = () =>
+  crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+
+const createEmptySession = (): ChatSession => {
+  const timestamp = new Date().toISOString();
+  return {
+    id: createId(),
+    title: "New Chat",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    messages: [],
+  };
+};
+
+function App() {
+  const [sessions, setSessions] = useState<ChatSession[]>(() => {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as ChatSession[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch {
+        // ignore broken cache
+      }
+    }
+    return [createEmptySession()];
+  });
+
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    sessions[0].id
+  );
+  const [draft, setDraft] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<SettingsState>({
+    provider: "ollama",
+    endpoint: "http://localhost:11434",
+    model: "qwen-3",
+  });
+
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId) ?? sessions[0],
+    [activeSessionId, sessions]
+  );
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+  }, [sessions]);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [activeSession?.messages.length]);
+
+  const updateSession = (
+    sessionId: string,
+    updater: (session: ChatSession) => ChatSession
+  ) => {
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === sessionId ? updater(session) : session
+      )
+    );
+  };
+
+  const ensureTitle = (
+    session: ChatSession,
+    nextMessages: ChatMessage[]
+  ): string => {
+    if (session.title !== "New Chat") return session.title;
+    const firstUser = nextMessages.find((m) => m.role === "user");
+    return firstUser
+      ? firstUser.content.slice(0, 32) || "New Chat"
+      : "New Chat";
+  };
+
+  const handleSend = () => {
+    const text = draft.trim();
+    if (!text || !activeSession) return;
+
+    const userMessage: ChatMessage = {
+      id: createId(),
+      role: "user",
+      content: text,
+      createdAt: new Date().toISOString(),
+    };
+
+    const assistantPlaceholder: ChatMessage = {
+      id: createId(),
+      role: "assistant",
+      content: "Assistant replies will appear here once connected.",
+      createdAt: new Date().toISOString(),
+    };
+
+    updateSession(activeSession.id, (session) => {
+      const nextMessages = [
+        ...session.messages,
+        userMessage,
+        assistantPlaceholder,
+      ];
+      const nextTitle = ensureTitle(session, nextMessages);
+      return {
+        ...session,
+        messages: nextMessages,
+        title: nextTitle,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    setDraft("");
+  };
+
+  const handleEnterKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleNewChat = () => {
+    const next = createEmptySession();
+    setSessions((prev) => [next, ...prev]);
+    setActiveSessionId(next.id);
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    setActiveSessionId(sessionId);
+  };
+
+  const handleSettingsSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    setShowSettings(false);
+  };
+
+  const handleSettingsChange = (key: keyof SettingsState, value: string) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1>shell-werk</h1>
+          <p className="muted">Local LLM assistant</p>
+        </div>
+        <button className="primary" onClick={handleNewChat}>
+          New Chat
+        </button>
+        <nav className="session-list" aria-label="Past chats">
+          {sessions.map((session) => (
+            <button
+              key={session.id}
+              className={`session-item ${
+                session.id === activeSession?.id ? "active" : ""
+              }`}
+              onClick={() => handleSelectSession(session.id)}
+            >
+              <span className="session-title">
+                {session.title || "New Chat"}
+              </span>
+              <span className="session-meta">
+                {new Date(session.updatedAt).toLocaleString()}
+              </span>
+            </button>
+          ))}
+        </nav>
+        <button className="ghost" onClick={() => setShowSettings(true)}>
+          Settings
+        </button>
+      </aside>
+
+      <main className="chat-pane">
+        <div className="chat-header">
+          <div>
+            <p className="label">Active chat</p>
+            <h2>{activeSession?.title || "New Chat"}</h2>
+          </div>
+          <div className="chip">Chat-only mode pending</div>
+        </div>
+
+        <div className="chat-feed" ref={chatScrollRef}>
+          {activeSession?.messages.length ? (
+            activeSession.messages.map((message) => (
+              <div
+                key={message.id}
+                className={`message message-${message.role}`}
+              >
+                <div className="message-meta">
+                  <span className="role-label">{message.role}</span>
+                  <span className="time">
+                    {new Date(message.createdAt).toLocaleTimeString()}
+                  </span>
+                </div>
+                <div className="message-body">{message.content}</div>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">
+              <p>Start by asking a question or describing a task.</p>
+              <p className="muted">
+                Messages stay local and persist across restarts.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="composer" aria-label="Chat input">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleEnterKey}
+            placeholder="Message shell-werk"
+            rows={3}
+          />
+          <button
+            className="primary"
+            onClick={handleSend}
+            disabled={!draft.trim()}
+          >
+            Send
+          </button>
+        </div>
+      </main>
+
+      {showSettings && (
+        <div className="modal-backdrop">
+          <dialog className="modal" open aria-modal="true">
+            <div className="modal-header">
+              <h3>Model settings</h3>
+              <button className="ghost" onClick={() => setShowSettings(false)}>
+                Close
+              </button>
+            </div>
+            <form className="modal-body" onSubmit={handleSettingsSubmit}>
+              <label>
+                <span className="label-text">Provider</span>
+                <select
+                  value={settings.provider}
+                  onChange={(e) =>
+                    handleSettingsChange("provider", e.target.value)
+                  }
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="vllm">vLLM</option>
+                  <option value="mock">Mock</option>
+                </select>
+              </label>
+              <label>
+                <span className="label-text">Endpoint</span>
+                <input
+                  type="text"
+                  value={settings.endpoint}
+                  onChange={(e) =>
+                    handleSettingsChange("endpoint", e.target.value)
+                  }
+                  placeholder="http://localhost:11434"
+                />
+              </label>
+              <label>
+                <span className="label-text">Model</span>
+                <input
+                  type="text"
+                  value={settings.model}
+                  onChange={(e) =>
+                    handleSettingsChange("model", e.target.value)
+                  }
+                  placeholder="qwen-3"
+                />
+              </label>
+              <p className="muted">
+                Full provider wiring coming in later milestones.
+              </p>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowSettings(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="primary">
+                  Save
+                </button>
+              </div>
+            </form>
+          </dialog>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;

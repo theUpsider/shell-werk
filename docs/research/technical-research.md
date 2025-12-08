@@ -1,1062 +1,146 @@
-# Technical Research & Implementation Strategy
-
-This document tracks critical technical research questions that must be answered before development begins. The goal is to provide developers with a clear implementation guide, particularly for complex integrations like LLM tool calling and cross-platform shell execution.
-
-We assume:
-
-- Backend: Tauri (Rust)
-- Frontend: React + TypeScript
-- Local providers: Ollama, vLLM (OpenAI-compatible server)
-- Target OS: Linux, Windows
-
----
-
-## 1. LLM Tool Calling Implementation (Ollama & vLLM)
-
-**Context:** REQ-009, REQ-013  
-**Goal:** Establish a unified way to handle tool calling across different providers.
-
-### Findings
-
-#### 1.1 Ollama Tool Calling API
-
-**How does Ollama structure tool definitions in the request?**
-
-- For the native REST API (`/api/chat`), tools are defined on the top-level `tools` field.
-- The schema matches the OpenAI “tools / function calling” format: each tool is an object `{ type: "function", function: { name, description, parameters } }`, where `parameters` is a JSON Schema object.:contentReference[oaicite:0]{index=0}
-- Example from the official “Streaming responses with tool calling” blog (simplified):
-
-  ```json
-  {
-    "model": "qwen3",
-    "messages": [
-      { "role": "user", "content": "What is the weather today in Toronto?" }
-    ],
-    "stream": true,
-    "tools": [
-      {
-        "type": "function",
-        "function": {
-          "name": "get_current_weather",
-          "description": "Get the current weather for a location",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "location": { "type": "string" },
-              "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"]
-              }
-            },
-            "required": ["location", "format"]
-          }
-        }
-      }
-    ]
-  }
-  ```
-
-````
-
-([Ollama][1])
-
-**How does Ollama return tool calls in the response (streaming vs non-streaming)?**
-
-* Ollama’s native `/api/chat` streaming returns NDJSON (one JSON object per line).([Ollama Documentation][2])
-* Each streamed chunk looks roughly like:
-
-  ```json
-  {
-    "model": "qwen3",
-    "created_at": "2025-05-27T22:54:58.100509Z",
-    "message": {
-      "role": "assistant",
-      "content": "",
-      "tool_calls": [
-        {
-          "function": {
-            "name": "get_current_weather",
-            "arguments": {
-              "format": "celsius",
-              "location": "Toronto"
-            }
-          }
-        }
-      ]
-    },
-    "done": false
-  }
-  ```
-
-  * Note: `message.tool_calls[].function.arguments` is already parsed as a JSON object (not a JSON string) on the native API.([Ollama][1])
-* The final chunk includes `"done": true` plus timing/usage metadata.([Ollama Documentation][2])
-* Non-streaming (`"stream": false`) returns a single JSON object with the same `message` shape (including any `tool_calls`).
-
-**Is it fully compatible with the OpenAI Chat Completions `tools` / `tool_calls` schema?**
-
-* Semantics:
-
-  * The **tools** description is effectively the same as OpenAI: functions + JSON Schema params.([Ollama][1])
-  * `message.tool_calls[].function.name` and `.arguments` align conceptually with OpenAI’s `tool_calls`.([Ollama][1])
-* Differences:
-
-  * Native Ollama uses `message` instead of `choices[0].message`.
-  * `arguments` is an object in Ollama native, versus a JSON string in OpenAI’s Chat Completions.([Ollama][1])
-  * Some OpenAI fields (e.g., tool call IDs, indices, `finish_reason: "tool_calls"`) are absent from native responses.
-* Ollama also exposes an OpenAI-compatible `/v1/chat/completions` endpoint, which follows the OpenAI spec for `tools` and `tool_calls` while ignoring unsupported options.([vLLM][3])
-  For now, we should assume “mostly compatible but not guaranteed identical” and test it explicitly for our target version.
-
-#### 1.2 vLLM Tool Calling API
-
-**Does the vLLM version support native tool calling, or do we need prompt templates?**
-
-* vLLM’s OpenAI-compatible server (`vllm serve`) implements the Chat Completions API at `/v1/chat/completions`.([vLLM][3])
-* Tool calling is supported by enabling a tool parser:
-
-  ```bash
-  vllm serve <model> \
-    --enable-auto-tool-choice \
-    --tool-call-parser hermes
-  ```
-
-([vLLM][4])
-
-* From the client side (Rust or TS), you simply use standard OpenAI-style `tools` and `tool_choice` fields in the Chat Completions request.([vLLM][4])
-* You still need a **chat template** configured for the model to support the Chat API, but that is a server concern (CLI `--chat-template` or model’s built-in template).([vLLM][3])
-
-**If using an OpenAI-compatible server, does it strictly follow the `tool_calls` format?**
-
-* vLLM’s examples show the exact OpenAI-style structure:
-
-  * Request: `tools: [{ type: "function", function: { name, description, parameters } }]`.([vLLM][4])
-  * Non-stream response: `choices[0].message.tool_calls[0].function.name` and `.arguments` (string).([vLLM][4])
-  * Streaming response: `choices[0].delta.tool_calls[0].index` and `...function.arguments` (partial JSON string), plus possible `choices[0].delta.reasoning` for reasoning models.([vLLM][4])
-
-* There are some known deviations: for example, vLLM ignores `parallel_tool_calls` and `user` fields.([vLLM][3])
-  But the core `tool_calls` shape matches OpenAI, which is sufficient for unified parsing.
-
-#### 1.3 Unified Parsing Logic
-
-**Can we use a single Rust struct (via `serde`) to deserialize responses from both providers?**
-
-* At the **top level**, Ollama native and OpenAI/vLLM are different:
-
-  * Ollama native streaming: `{ model, created_at, message, done, ... }`.([Ollama][1])
-  * OpenAI/vLLM: `{ id, choices: [ { delta/message, finish_reason, ... } ], ... }`.([vLLM][4])
-
-* At the **message / tool-call level**, we can define a single internal representation:
-
-  ```rust
-  #[derive(Debug, Deserialize)]
-  pub struct ToolCall {
-      #[serde(default)]
-      pub id: Option<String>,       // OpenAI/vLLM; absent in Ollama native
-      #[serde(default)]
-      pub r#type: Option<String>,   // "function"
-      pub function: FunctionCall,
-  }
-
-  #[derive(Debug, Deserialize)]
-  pub struct FunctionCall {
-      pub name: String,
-      #[serde(deserialize_with = "deserialize_arguments")]
-      pub arguments: serde_json::Value, // handles both string + object
-  }
-  ```
-
-  ```rust
-  fn deserialize_arguments<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
-  where
-      D: serde::Deserializer<'de>,
-  {
-      use serde::de::Error;
-      let v = serde_json::Value::deserialize(deserializer)?;
-      match v {
-          // OpenAI/vLLM: arguments is a JSON string
-          serde_json::Value::String(s) => {
-              serde_json::from_str(&s).map_err(D::Error::custom)
-          }
-          // Ollama native: arguments is already an object
-          other => Ok(other),
-      }
-  }
-  ```
-
-* Strategy:
-
-  * Define **provider-specific response structs** that only care enough to get to `ToolCall`:
-
-    * `OllamaChatChunk` with `.message: OllamaMessage`.
-    * `OpenAIChatChunk` with `.choices[0].delta` or `.choices[0].message`.
-
-  * Immediately map those into a **provider-neutral** `LlmStreamEvent`:
-
-    ```rust
-    pub enum LlmStreamEvent {
-        ThinkingToken { text: String },
-        AnswerToken { text: String },
-        ToolCallDelta { call: ToolCall, index: usize },
-        Done,
-        ProviderRaw(serde_json::Value), // for logging/debug
-    }
-    ```
-
-  * This way we share one `ToolCall` / `FunctionCall` struct across providers, but keep simple shims for the top-level wrapper differences.
-
-**How do we handle partial JSON parsing when streaming tool calls?**
-
-* OpenAI/vLLM behavior:
-
-  * `choices[0].delta.tool_calls[0].function.arguments` is emitted as **partial JSON fragments** over multiple chunks.([vLLM][4])
-  * Typical approach (vLLM example):
-
-    * Maintain a buffer per `(choice_index, tool_call_index)`.
-    * On each chunk, append `delta.tool_calls[...].function.arguments` to the current string buffer.
-    * After the stream ends, parse the full arguments string as JSON.([vLLM][4])
-
-* Our plan:
-
-  ```rust
-  struct InFlightToolCall {
-      function_name: Option<String>,
-      argument_buf: String,
-  }
-
-  struct ToolCallAssembler {
-      calls: HashMap<(u32 /*choice*/, u32 /*tool_index*/), InFlightToolCall>,
-  }
-
-  impl ToolCallAssembler {
-      fn on_delta(&mut self, choice_idx: u32, tool_idx: u32, delta: &ToolCallDelta) {
-          let entry = self.calls
-              .entry((choice_idx, tool_idx))
-              .or_insert_with(|| InFlightToolCall {
-                  function_name: None,
-                  argument_buf: String::new(),
-              });
-
-          if let Some(name) = delta.function_name.as_deref() {
-              entry.function_name = Some(name.to_string());
-          }
-          if let Some(args_fragment) = delta.arguments_fragment.as_deref() {
-              entry.argument_buf.push_str(args_fragment);
-          }
-      }
-
-      fn finalize(self) -> Vec<ToolCall> {
-          self.calls
-              .into_iter()
-              .filter_map(|((_c, _t), inflight)| {
-                  let args_json = serde_json::from_str::<serde_json::Value>(&inflight.argument_buf).ok()?;
-                  Some(ToolCall {
-                      id: None,
-                      r#type: Some("function".into()),
-                      function: FunctionCall {
-                          name: inflight.function_name.unwrap_or_default(),
-                          arguments: args_json,
-                      },
-                  })
-              })
-              .collect()
-      }
-  }
-  ```
-
-* For **Ollama native**, we can treat each chunk’s `tool_calls` as already complete `arguments` values—no extra buffering beyond collecting them if we want to batch calls.
-
----
-
-### Implementation Notes (To be filled)
-
-**Implementation Notes**
-
-1. **Provider strategy**
-
-   * For **tool calling**:
-
-     * Use vLLM’s `/v1/chat/completions` (OpenAI-compatible) with `tools` for server-side models.([vLLM][3])
-     * Use **native Ollama `/api/chat`** for local models to get:
-
-       * Streaming NDJSON.
-       * Native `message.tool_calls` + `message.thinking` support.([Ollama][1])
-   * For purely OpenAI-style integrations, we can optionally use Ollama’s OpenAI-compatible endpoint, but we should treat it as “best effort” and have proper integration tests.
-
-2. **Rust types & mapping**
-
-   * Define:
-
-     * `OllamaChatChunk` matching `/api/chat` fields we care about.
-     * `OpenAiChatChunk` matching standard Chat Completions.
-     * `ToolCall` / `FunctionCall` as provider-neutral internal types (see above).
-   * Implement `From<OllamaChatChunk> for Vec<LlmStreamEvent>` and `From<OpenAiChatChunk> for Vec<LlmStreamEvent>` which feed a unified streaming channel to the Tauri / React client.
-
-3. **Streaming pipeline in Tauri**
-
-   * Tauri command (simplified):
-
-     ```rust
-     #[tauri::command]
-     async fn llm_chat_stream(request: ChatRequest) -> Result<(), String> {
-         let provider = select_provider(&request);
-         let mut stream = provider.chat_stream(request).await?;
-         while let Some(chunk) = stream.next().await {
-             let events = map_provider_chunk_to_events(chunk)?;
-             for evt in events {
-                 app_handle.emit_all("llm-stream", evt)?;
-             }
-         }
-         Ok(())
-     }
-     ```
-
-   * Frontend subscribes to `"llm-stream"` and updates the UI based on `LlmStreamEvent`.
-
-4. **Partial JSON handling**
-
-   * Implement `ToolCallAssembler` (above) specifically for OpenAI/vLLM streams (Ollama doesn’t need it).
-   * If `serde_json::from_str` fails at the end, surface a structured error and also expose the raw `argument_buf` for debugging/logging.
-
----
-
-## 2. "Thinking" State Visualization
-
-**Context:** REQ-003
-**Goal:** Display the internal reasoning process of the model before the final answer.
-
-### Findings
-
-#### 2.1 Ollama Streaming Format (Thinking)
-
-**Does Ollama emit specific tokens / fields for “thinking”?**
-
-* Yes. “Thinking-capable” models (e.g., Qwen 3, DeepSeek R1, GPT-OSS, etc.) emit a dedicated `thinking` field when you pass `"think": true` in chat or generate requests.([Ollama Documentation][5])
-* For `/api/chat`:
-
-  * Non-stream: the response has `message.thinking` (reasoning trace) and `message.content` (final answer).([Ollama Documentation][5])
-  * Stream: chunks interleave `message.thinking` tokens before `message.content` tokens.([Ollama Documentation][5])
-
-**How to differentiate between “thinking” content and final response content in the stream?**
-
-* Official streaming pattern:([Ollama Documentation][5])
-
-  * Start with `in_thinking = false`.
-  * For each chunk:
-
-    * If `chunk.message.thinking` is non-empty and `!in_thinking`, begin the thinking section (set `in_thinking = true`).
-    * While `chunk.message.thinking` has text, append it to the reasoning buffer.
-    * When `chunk.message.content` appears:
-
-      * If `in_thinking` is true, close the “Thinking” section and start the “Answer” section.
-      * Append `chunk.message.content` to the answer buffer.
-
-* Example (pseudocode, Rust):
-
-  ```rust
-  let mut in_thinking = false;
-
-  match event {
-      LlmStreamEvent::ThinkingToken { text } => {
-          if !in_thinking {
-              ui.begin_thinking_section();
-              in_thinking = true;
-          }
-          ui.append_thinking(text);
-      }
-      LlmStreamEvent::AnswerToken { text } => {
-          if in_thinking {
-              ui.end_thinking_section();
-              ui.begin_answer_section();
-              in_thinking = false;
-          }
-          ui.append_answer(text);
-      }
-      _ => {}
-  }
-  ```
-
-#### 2.2 vLLM Streaming Format (Reasoning)
-
-**How is the reasoning trace exposed in vLLM?**
-
-* vLLM supports “reasoning” models via OpenAI Chat Completions, with a dedicated `reasoning` field.([vLLM][4])
-* Non-streamed response:
-
-  * `completion.choices[0].message.reasoning` – the reasoning trace.
-  * `completion.choices[0].message.content` – the final answer.([vLLM][4])
-* Streamed response:
-
-  * Reasoning tokens are emitted in `choices[0].delta.reasoning`.
-  * Normal answer tokens are emitted in `choices[0].delta.content`.
-  * Example logic from vLLM docs:
-
-    ```python
-    if chunk.choices[0].delta.tool_calls:
-        ...
-    else:
-        if hasattr(chunk.choices[0].delta, "reasoning"):
-            reasoning += chunk.choices[0].delta.reasoning
-    ```
-
-([vLLM][4])
-
-* This maps naturally to `LlmStreamEvent::ThinkingToken` (from `.delta.reasoning`) and `LlmStreamEvent::AnswerToken` (from `.delta.content`).
-
-#### 2.3 Frontend Handling
-
-**How should the frontend state machine handle `thinking -> collapsing thoughts -> streaming response`?**
-
-Proposed React-side state machine:
-
-* States:
-
-  ```ts
-  type ThoughtPhase = "idle" | "thinking" | "collapsing" | "answering" | "done";
-  ```
-
-* Transitions:
-
-  * `idle` → `thinking` on first `ThinkingToken`.
-  * `thinking` → `collapsing` when the first `AnswerToken` or `ToolCallDelta` arrives.
-  * `collapsing` → `answering` after a short UX-driven delay (e.g., 200–400ms) to animate the collapse of the reasoning panel.
-  * `answering` → `done` on `Done` event.
-
-* Implementation sketch (React + Tauri events):
-
-  ```ts
-  type LlmStreamEvent =
-    | { type: "thinking"; text: string }
-    | { type: "answer"; text: string }
-    | { type: "tool_call"; call: ToolCall }
-    | { type: "done" };
-
-  function useLlmStream() {
-    const [phase, setPhase] = useState<ThoughtPhase>("idle");
-    const [thinkingText, setThinkingText] = useState("");
-    const [answerText, setAnswerText] = useState("");
-
-    useEffect(() => {
-      const unlisten = window.__TAURI__.event.listen<LlmStreamEvent>(
-        "llm-stream",
-        ({ payload }) => {
-          switch (payload.type) {
-            case "thinking":
-              if (phase === "idle") setPhase("thinking");
-              setThinkingText((t) => t + payload.text);
-              break;
-            case "answer":
-            case "tool_call":
-              if (phase === "thinking") {
-                setPhase("collapsing");
-                // After animation, move to answering
-                setTimeout(() => setPhase("answering"), 250);
-              }
-              if (payload.type === "answer") {
-                setAnswerText((t) => t + payload.text);
-              }
-              break;
-            case "done":
-              setPhase((p) => (p === "idle" ? "done" : p));
-              break;
-          }
-        }
-      );
-      return () => { unlisten.then((f) => f()); };
-    }, [phase]);
-
-    return { phase, thinkingText, answerText };
-  }
-  ```
-
-* UX recommendation:
-
-  * Show “Thinking…” with live updating tokens.
-  * On transition to `collapsing`, shrink the thinking section into a small, scrollable panel or a toggle (“Show reasoning”).
-  * For security/privacy, include a global setting allowing users to hide reasoning by default.
-
----
-
-### Implementation Notes (To be filled)
-
-**Implementation Notes**
-
-* For **Ollama**:
-
-  * Always pass `"think": true` for supported models when in “debug” mode; allow disabling in app settings.([Ollama Documentation][5])
-  * Map `chunk.message.thinking` → `LlmStreamEvent::ThinkingToken`.
-  * Map `chunk.message.content` → `LlmStreamEvent::AnswerToken`.
-
-* For **vLLM**:
-
-  * Expose an option to enable reasoning models and reasoning parsers on the server (`--reasoning-parser <parser>` for models like QwQ).([vLLM][4])
-  * Map `choices[].delta.reasoning` → `ThinkingToken`, `choices[].delta.content` → `AnswerToken`.
-
-* **Frontend**:
-
-  * Implement a single stream listener and render:
-
-    * A “Thinking” panel (collapsible).
-    * The main answer panel.
-  * Persist the full reasoning text in logs for debugging (behind a config flag).
-
----
-
-## 3. Safe Shell Execution & Sanitization
-
-**Context:** REQ-005
-**Goal:** Prevent malicious command execution while allowing legitimate user tasks.
-
-### Findings
-
-#### 3.1 Cross-Platform Sanitization (Rust / Tauri)
-
-**Rust libraries for parsing and sanitizing shell commands**
-
-* `shlex` crate:
-
-  * Parses strings into tokens using POSIX shell rules, similar to Python’s `shlex`.([Docs.rs][6])
-  * Good for turning a user-facing string (e.g., `"git status -sb"`) into `[ "git", "status", "-sb" ]` without actually invoking a shell.
-
-* `shell_escape` crate:
-
-  * Provides portable escaping for shell arguments, with Unix- and Windows-specific modules.([Docs.rs][7])
-  * Useful only when we *must* construct a command string for a real shell (`sh -c` or `powershell -Command`), which we should avoid for untrusted input.
-
-* `xshell` crate:
-
-  * Provides a cross-platform command “scripting” API built on `std::process::Command`, re-implementing many shell features safely in Rust.([Docs.rs][8])
-
-* Tauri shell plugin:
-
-  * `tauri-plugin-shell` exposes a constrained shell API with an allowlist and per-command scopes, designed with a multi-layered security model.([DeepWiki][9])
-  * This aligns well with our security goals; we can either:
-
-    * Use the plugin directly (frontend -> plugin).
-    * Or mirror its ideas in our own Rust backend commands.
-
-**Safe argument handling for PowerShell vs Bash/Zsh**
-
-* Best practice (Rust/Tauri):
-
-  * **Do not** pass user-controlled text to `sh -c` or `powershell -Command` as a single string.
-
-  * Instead, use `std::process::Command` (or Tauri’s equivalent) with **program + args**:
-
-    ```rust
-    let mut cmd = Command::new("git");
-    cmd.arg("status").arg("--short");
-    ```
-
-  * This treats special characters (`&`, `|`, `;`, `>` etc.) as literal arguments rather than shell syntax.([Rust Internals][10])
-
-* If we must call a real shell for some fixed functionality:
-
-  * Only for **static, non-user-controlled templates** (e.g., built-in `list_dir` command).
-  * Escape dynamic pieces with `shell_escape::unix::escape` or `shell_escape::windows::escape`.([Docs.rs][7])
-
-#### 3.2 Validation Logic
-
-**Whitelist / blacklist strategy**
-
-* Whitelist (preferred):
-
-  * Define a closed set of allowed binaries by OS, e.g.:
-
-    ```rust
-    enum AllowedProgram {
-        Git,
-        Node,
-        Npm,
-        Cargo,
-        Python,
-        // ...
-    }
-    ```
-
-  * Map from a string requested by the LLM to an `AllowedProgram`, rejecting anything else.
-
-* Extra rules:
-
-  * Disallow `sudo`, `su`, `powershell.exe` (if we don’t explicitly want it), `cmd.exe`, `reg`, disk utilities, etc.
-  * Restrict filesystem writes:
-
-    * For destructive commands (e.g., `rm`, `del`), either disallow completely or restrict paths to an app-specific workspace directory.
-  * Use “capabilities” per command:
-
-    * E.g., for `git`, only allow read-only commands (`status`, `log`, `diff`) from the agent.
-
-**Detecting chained commands (`;`, `&&`, `|`, etc.)**
-
-* If we parse the user string with `shlex::split`, we can simply reject any token equal to:
-
-  * `";"`, `"&&"`, `"||"`, `"|"`, `">"`, `">>"`, `"<"`.
-  * Also check for suspicious patterns like `$(`, `$(...)`, backticks.
-
-  ```rust
-  fn contains_shell_control(tokens: &[String]) -> bool {
-      static DANGEROUS: &[&str] = &[";", "&&", "||", "|", ">", ">>", "<"];
-      tokens.iter().any(|t| DANGEROUS.contains(&t.as_str()))
-  }
-  ```
-
-* Even though `Command::new` would treat these as ordinary args, banning them avoids patterns like trying to trick our own wrappers or external tools that evaluate strings.
-
-* On Windows, we also avoid constructing a combined `cmd /C "<user>"` or `powershell -Command "<user>"` string to prevent injection via the very permissive command-line parsing.([The Rust Programming Language Forum][11])
-
----
-
-### Implementation Notes (To be filled)
-
-**Implementation Notes**
-
-1. **Tauri command design**
-
-   * Expose a single Rust command that the LLM tool calls, e.g.:
-
-     ```rust
-     #[derive(Deserialize)]
-     struct ShellCommandRequest {
-         program: String,
-         args: Vec<String>,
-         cwd: Option<String>,
-     }
-     ```
-
-     ```rust
-     #[tauri::command]
-     async fn run_shell_command(req: ShellCommandRequest) -> Result<CommandResult, String> {
-         let program = map_to_allowed_program(&req.program)
-             .ok_or_else(|| "Program not allowed".to_string())?;
-
-         // Token-level checks (e.g., from an optional command-line string).
-         if contains_shell_control(&req.args) {
-             return Err("Chained shell operators are not allowed".into());
-         }
-
-         let mut cmd = std::process::Command::new(program.binary_name());
-         cmd.args(&req.args);
-
-         if let Some(cwd) = &req.cwd {
-             cmd.current_dir(cwd);
-         }
-
-         let output = cmd.output().map_err(|e| e.to_string())?;
-
-         Ok(CommandResult {
-             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-             status: output.status.code(),
-         })
-     }
-     ```
-
-2. **LLM tool schema for shell execution**
-
-   * Define a tool in the LLM layer that **does not accept raw shell strings**, only structured parameters:
-
-     ```json
-     {
-       "type": "function",
-       "function": {
-         "name": "run_command",
-         "description": "Execute a safe, whitelisted system command",
-         "parameters": {
-           "type": "object",
-           "properties": {
-             "program": { "type": "string" },
-             "args": { "type": "array", "items": { "type": "string" } },
-             "cwd": { "type": "string", "nullable": true }
-           },
-           "required": ["program", "args"]
-         }
-       }
-     }
-     ```
-
-   * We validate `program` and `args` as above before executing.
-
-3. **OS constraints**
-
-   * Normalise behaviour across Linux and Windows by:
-
-     * Avoiding shell-specific features.
-     * Using `std::process::Command` everywhere.
-   * For commands that are inherently shell-specific (e.g., `dir`), create app-level adapters:
-
-     * e.g., `list_directory` → internally runs `ls` on Linux, `cmd /C dir` with a *static* template on Windows.
-
-4. **Audit logging**
-
-   * Log all executed commands, including:
-
-     * Provider that requested the tool call.
-     * Normalised `program` + `args`.
-     * Exit status and truncated stdout/stderr.
-   * Use logs for post-hoc security review and tuning the allowlist.
-
----
-
-## 4. E2E Testing Infrastructure
-
-**Context:** REQ-007, REQ-008
-**Goal:** Reliable CI/CD pipeline with local LLM integration.
-
-### Findings
-
-#### 4.1 GitHub Actions Caching for Ollama Models
-
-**How do we cache the `qwen3:4b` Ollama model blob to prevent massive downloads on every CI run?**
-
-* Default model paths:
-
-  * On many Linux installs, Ollama stores models under `/usr/share/ollama/.ollama/models` or `/var/lib/ollama/.ollama/models`.([GitHub][12])
-  * On single-user setups, models commonly reside in `~/.ollama/models`.([Stack Overflow][13])
-  * On Windows, default path is `C:\Users\<user>\.ollama\models`.([igoroseledko.com][14])
-* Official docs recommend using the `OLLAMA_MODELS` environment variable to override the models directory.([Ollama Documentation][15])
-
-**Recommended CI caching strategy**
-
-* In GitHub Actions, do:
-
-  * Set `OLLAMA_MODELS` to a directory inside the workspace or runner temp dir (so it’s cacheable):
-
-    ```yaml
-    env:
-      OLLAMA_MODELS: ${{ runner.temp }}/ollama-models
-    ```
-
-  * Use `actions/cache@v4` to persist that directory keyed by model + OS:
-
-    ```yaml
-    - name: Cache Ollama models
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.OLLAMA_MODELS }}
-        key: ollama-models-qwen3-4b-${{ runner.os }}-v1
-    ```
-
-  * After installing Ollama, run:
-
-    ```yaml
-    - name: Pull qwen3:4b model
-      run: |
-        ollama pull qwen3:4b
-    ```
-
-    If the cache was restored, this is mostly a no-op and just verifies integrity.
-
-#### 4.2 Service Orchestration
-
-**How do we ensure Ollama is fully up and the model is loaded before Playwright tests?**
-
-* Basic pattern from a proven GitHub Actions answer: install Ollama, start `ollama serve` in the background, pull a model, then call the API.([Stack Overflow][16])
-
-* Robust workflow sketch:
-
-  ```yaml
-  name: e2e-tests
-
-  on:
-    push:
-    pull_request:
-
-  jobs:
-    e2e:
-      runs-on: ubuntu-latest
-
-      env:
-        OLLAMA_MODELS: ${{ runner.temp }}/ollama-models
-
-      steps:
-        - uses: actions/checkout@v4
-
-        - name: Cache Ollama models
-          uses: actions/cache@v4
-          with:
-            path: ${{ env.OLLAMA_MODELS }}
-            key: ollama-models-qwen3-4b-${{ runner.os }}-v1
-
-        - name: Install Ollama
-          run: curl -fsSL https://ollama.com/install.sh | sh
-
-        - name: Start Ollama server
-          run: |
-            ollama serve > ollama.log 2>&1 &
-            # Wait for the HTTP endpoint to be ready
-            for i in {1..30}; do
-              if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
-                echo "Ollama is up"; break
-              fi
-              echo "Waiting for Ollama..."
-              sleep 2
-            done
-
-        - name: Pull qwen3:4b
-          run: |
-            ollama pull qwen3:4b
-
-        - name: Warm up model
-          run: |
-            curl -s -X POST http://localhost:11434/api/generate \
-              -d '{"model":"qwen3:4b","prompt":"ping","stream":false}' \
-              | jq .
-
-        - name: Install Node deps
-          run: npm ci
-
-        - name: Run Playwright tests
-          run: npx playwright test
-  ```
-
-* Notes:
-
-  * The `Warm up model` step ensures `qwen3:4b` is loaded into memory before tests, reducing first-test latency.
-  * You can further tune `OLLAMA_KEEP_ALIVE` server-side or via `keep_alive` request params to keep the model loaded longer.
-
-**Service container vs background step**
-
-* Using a Docker service container is possible via the official `ollama/ollama` image, but:
-
-  * It adds more moving parts (Docker-in-Docker, port mapping).
-  * For CI with Playwright, the simpler approach is:
-
-    * Install Ollama via `install.sh` on `ubuntu-latest`.
-    * Start `ollama serve &` in a background step as shown above.
-
----
-
-### Implementation Notes (To be filled)
-
-**Implementation Notes**
-
-* Add an E2E test helper in Node that checks connectivity before starting tests:
-
-  ```ts
-  import http from "http";
-
-  export async function waitForOllama(timeoutMs = 60_000) {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const req = http.get("http://localhost:11434/api/tags", (res) => {
-            res.resume();
-            res.statusCode === 200 ? resolve() : reject();
-          });
-          req.on("error", reject);
-        });
-        return;
-      } catch {
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-    }
-    throw new Error("Ollama did not become ready in time");
-  }
-  ```
-
-* In Playwright’s `globalSetup`, call `waitForOllama()` once to fail fast if Ollama is unreachable.
-
-* Later we can add an equivalent path for vLLM (probably in a separate job that starts `vllm serve` in the background and waits on its port).
-
----
-
-## 5. Provider Abstraction Layer
-
-**Context:** REQ-009
-**Goal:** Switch between providers without changing application logic.
-
-### Findings
-
-#### 5.1 Client Libraries
-
-**Is there a robust Rust crate that supports generic base URLs and custom headers?**
-
-* `async-openai` (Rust):
-
-  * Mature crate for OpenAI APIs that also supports “OpenAI-compatible” providers by customising the base URL and config.
-
-  * `OpenAIConfig::with_api_base` lets you override the API base URL, e.g.:
-
-    ```rust
-    use async_openai::{Client, config::OpenAIConfig};
-
-    let config = OpenAIConfig::new()
-        .with_api_key("EMPTY")
-        .with_api_base("http://localhost:8000/v1"); // vLLM
-    let client = Client::with_config(config);
-    ```
-
-    for vLLM, or
-
-    ```rust
-    .with_api_base("http://localhost:11434/v1"); // Ollama OpenAI-compatible
-    ```
-
-    for Ollama.
-
-  * The crate exposes a `Config` trait, allowing multiple providers with different bases and headers to be used via dynamic dispatch.
-
-* TypeScript / React side:
-
-  * Official `openai` TS client supports custom `baseURL` as well:
-
-    ```ts
-    import OpenAI from "openai";
-
-    const client = new OpenAI({
-      baseURL: "http://localhost:8000/v1", // vLLM
-      apiKey: "EMPTY",
-    });
-    ```
-
-  * However, in a Tauri app, it’s usually cleaner to keep network I/O in the Rust backend and expose a unified Tauri command to the frontend, instead of making HTTP calls directly from the webview.
-
-#### 5.2 Trait Design: `LLMProvider`
-
-**Do we need a custom trait to handle subtle API differences?**
-
-Yes. Even with OpenAI-compatible APIs, we have differences:
-
-* Ollama native vs OpenAI shape.
-* Thinking support (`thinking` vs `reasoning`).
-* Tool calling streaming details.
-
-Define a Rust trait that describes a generic provider:
-
-```rust
-#[async_trait::async_trait]
-pub trait LlmProvider: Send + Sync {
-    fn name(&self) -> &'static str;
-
-    async fn chat_stream(
-        &self,
-        request: ChatRequest,
-    ) -> anyhow::Result<BoxStream<'static, LlmStreamEvent>>;
-
-    async fn chat_once(
-        &self,
-        request: ChatRequest,
-    ) -> anyhow::Result<ChatResponse>;
+Technical Research & Implementation Strategy (Wails Desktop App)
+This document tracks critical technical research questions that must be answered before development begins. The goal is to provide developers with a clear implementation guide for a Wails-based desktop application, particularly for complex integrations like LLM tool calling, safe cross-platform shell execution, and frontend–backend coordination.
+The assumptions here are: - Desktop shell: Wails (Go backend + web frontend)
+- LLMs: Exposed via HTTP APIs (e.g., Ollama, vLLM, or OpenAI-compatible gateways).
+________________________________________
+1. LLM Tool Calling Implementation (Ollama & vLLM)
+Context: REQ-009, REQ-013
+Goal: Establish a unified way to handle tool calling across different LLM providers, exposed through a clean Wails backend API to the frontend.
+Research Questions
+•	Ollama Tool Calling API: Ollama supports OpenAI-style function calling (referred to as tools in Ollama). To enable this, we provide a list of available tools in the API request via the tools field. Each tool is defined with a type (e.g., "type": "function") and a JSON schema describing the function (name, description, parameters). Ollama’s response, when a tool is invoked, includes a tool_calls array in the returned JSON. This array contains one or more tool call objects, each with the function name and the arguments the model wants to use. Notably, the assistant’s message content in that response is typically an empty string when a tool call is made (since the model is deferring its answer pending the tool result). Ollama currently returns tool calls at the end of a completion (in non-streaming mode), and the calls are fully structured JSON objects (arguments are already parsed, not a raw string). As of mid-2024, streaming tool call support was planned, and by May 2025 Ollama introduced streaming responses with tool usage, meaning the model’s reasoning and tool request can be sent incrementally. In streaming mode, Ollama emits interim “thinking” content followed by a chunk containing the tool_calls once the model decides to use a tool. Importantly, Ollama’s OpenAI-compatible API endpoint also accepts the same tools parameter and returns tool calls, making it mostly compatible with OpenAI function calling conventions. One subtle difference is that OpenAI’s API would put function call info in a single function_call field (with arguments as a JSON string), whereas Ollama returns a list under tool_calls with arguments as an object – we will need to normalize this in our implementation.
+•	vLLM Tool Calling API: vLLM is an open-source LLM serving system that can also support function (tool) calling. If we use a vLLM HTTP server (which mimics the OpenAI Chat Completions API), we can send a request with a tools array (function definitions) and a special parameter to control tool usage. vLLM uses a field called tool_choice – for instance, setting tool_choice: "auto" allows the model to decide if and when to call a tool[1]. In practice, with vLLM 0.8.3+ and certain model-specific plugins, the server will intercept the model’s output and structure any tool requests into a JSON response similar to OpenAI’s format. vLLM’s response includes a tool_calls field (much like Ollama’s) inside the message for a function call. The function name and arguments appear there; however, in many cases vLLM (following OpenAI’s convention) will provide arguments as a JSON string. For example, the arguments might come through as "arguments": "{\"location\": \"San Francisco, CA\", \"unit\": \"fahrenheit\"}" in the JSON, which then needs json.loads to use in code. We will need to parse that string to an object on our side. It’s important to note that vLLM’s ability to do function calls depends on the model and the prompt template used. The vLLM documentation shows that you must enable a tool-call parser and use a chat template tuned for the model (e.g., Meta’s Llama 3.1 requires the llama3_json parser and a corresponding template). If the model isn’t fine-tuned for tools, vLLM might not return structured tool_calls. In such cases, we might have to fall back to prompt engineering (e.g., asking the model to output a specific JSON format) rather than native function calling. In summary, vLLM can match the OpenAI API behavior for function calls, but we must ensure the model and server are configured for it (using --enable-auto-tool-choice and an appropriate --tool-call-parser).
+•	Unified Parsing Logic (Provider-Agnostic): To keep our application logic simple, we will introduce a provider-agnostic internal data model for tool use. For example, we might define a Go struct or TypeScript interface ToolCall with fields like name (string) and arguments (map/object). When the backend receives a response from any provider, it will map that response to our internal model. In practice, for Ollama we will take the entries in tool_calls (already nicely structured) and convert them to ToolCall instances directly. For vLLM or other OpenAI-compatible responses, if the arguments are a JSON string, we will decode that string into an object so that it matches our internal representation. This way, the frontend doesn’t need to know about the string-vs-object discrepancy. Handling partial responses in streaming mode is a bit more complex: we need to accumulate chunks until a complete tool call is received. For example, with streaming Ollama, the model might stream a tool’s arguments character by character as part of the JSON. Our backend will likely buffer the output when it detects that the assistant is in the middle of a "tool_calls": [...] JSON structure and only emit a tool_call event to the frontend once the JSON is complete and parseable. We can look for the closing } or use a streaming JSON parser. Additionally, we saw that Ollama’s streaming approach encloses reasoning in <think>…</think> and then sends the tool_calls chunk. We will leverage such patterns to know when one phase ends and a tool invocation begins. Ultimately, the backend API exposed to our React frontend will be provider-agnostic: e.g., the frontend might receive an object like { role: "assistant", content: "...", toolCalls: [ {name: ..., arguments: {...}} ] } regardless of whether the call was handled by Ollama or vLLM. Achieving this uniform shape will require normalizing the field names and structures from each provider (for instance, translating OpenAI’s function_call or Ollama’s internal fields into our common format).
+Implementation Notes
+Based on the above, we will implement a Tool Call Handler in the backend that interfaces with both Ollama and vLLM: - When sending requests, if the active LLM provider is Ollama or vLLM, we attach the tool definitions in the request JSON under the appropriate field (tools for both, since both accept an OpenAI-like tools array). - The backend will have logic to detect a tool call in responses. In non-streaming mode, this is simply checking if tool_calls (Ollama/vLLM) or function_call (OpenAI) is present in the returned JSON. In streaming mode, the backend will inspect each chunk. For Ollama, a chunk with an empty content and a non-empty tool_calls array indicates a tool invocation. For OpenAI, a chunk might include "function_call": { "name": ..., "arguments": "partial JSON as it streams – we’ll accumulate until the JSON brackets are balanced. - We will create a translation layer: Ollama’s tool_calls array will be mapped directly. OpenAI/vLLM’s function_call (if present) will be converted into a tool_calls-like structure. This might involve wrapping the single function call into a list for consistency. The arguments string will be parsed into an object using a JSON parser. - By abstracting this, the frontend can be unaware of provider differences. It will simply receive events or data indicating “the model wants to use X tool with Y arguments” and can act accordingly (e.g., display a message or execute an action). - We also note that both Ollama and vLLM aim to be compatible with OpenAI’s schema, but with minor variations. We will document these and ensure our code accounts for them (for example, Ollama’s design of allowing multiple tools in one response – if that ever happens, our logic should handle multiple ToolCall entries sequentially).
+2. "Thinking" State Visualization (Frontend + Wails Events)
+Context: REQ-003
+Goal: Display the internal reasoning process of the model before the final answer in the Wails-based UI.
+Research Questions
+•	Ollama Streaming Format: We need to determine how (and if) Ollama indicates the model’s “thinking” or reasoning content separately from final answers. By default, the OpenAI API doesn’t stream rationale text to the user, but some model implementations do. Ollama, when used with certain models like Qwen 3 (which support a thinking mode), will stream reasoning in a special format. The example from Ollama’s streaming update shows the model outputting <think> ... </think> tags around its reasoning. In the raw streamed JSON, we see chunks where the assistant content is “<think>” or some part of the reasoning, and then a closing </think>, etc., each as separate messages. If a model does not provide such markers, Ollama doesn’t automatically separate “thoughts” versus answers (there isn’t a built-in field for “thinking” content in the JSON, aside from what the model itself outputs). In such cases, we might impose a convention: for instance, instruct the model via the system prompt to delineate its reasoning with identifiable tokens. If we have control over the model’s system prompt, we could add something like: “Think step-by-step and enclose your reasoning between <think> and </think> tags.” This way, even if not natively supported, we get a parsable reasoning segment. The key is a deterministic pattern to split reasoning from answer: special XML-like tags, a specific prefix (e.g., “Thought: ...”), or a JSON structure if the model can output one.
+•	vLLM Streaming Format: For the targeted vLLM setup, the behavior depends largely on the model. If using Qwen via vLLM, the Qwen model is actually designed with a two-phase output (it has a “thinking” mode enabled by default). The Qwen documentation notes that Qwen-3 will “think” before responding and can output reasoning content, which vLLM can optionally capture in a separate field. Specifically, vLLM 0.9.0 introduced a reasoning_parser for Qwen that, when enabled (--enable-reasoning), will populate a reasoning_content field in the response containing the thought process. This means the vLLM server is actively parsing out the <think>...</think> content from Qwen’s raw output and structuring it. If we use that feature, our backend could get the reasoning text neatly separated, without needing to regex the tags. However, this is not part of the standard OpenAI API spec (it’s an extension), so using it ties us to vLLM’s interface. If our app is primarily local (not using OpenAI’s cloud), that’s fine. For other models or providers, we likely fall back to the prompt convention or model’s own behavior. In summary, if the chosen model (like Qwen) and stack (vLLM or Ollama) support a thinking trace, we’ll leverage it; otherwise, we’ll implement a uniform approach (like the tagging method mentioned above) to get the reasoning.
+•	Frontend Handling (Wails Integration): We plan to reflect this "thinking" state in the UI. The backend (Go) will send events to the frontend (React) to indicate different phases of the conversation. Wails provides an event system where Go can emit events with data, and the JS frontend can listen for them. We envision using events such as:
+•	thinking:start – Emitted when the model begins its reasoning phase. The backend would trigger this as soon as it detects a reasoning segment starting (e.g., upon receiving a <think> token or equivalent).
+•	thinking:update – Emitted continuously as chunks of the reasoning text stream in. The event payload might contain the latest token or sentence for the thinking process. The frontend can append it to a "thoughts" panel in the UI.
+•	thinking:end – Emitted when the reasoning segment is complete (for instance, when we encounter </think> or when the model is about to output the final answer). This could signal the UI to stop highlighting the "thinking..." indicator.
+•	answer:update – Emitted for each chunk of the final answer content, so we can live-update the answer in the chat bubble.
+•	answer:complete – Emitted when the final answer is done.
+On the React side, we’ll manage a state machine with these events. Initially the state is idle (no response in progress). When thinking:start arrives, we transition to a thinking state, perhaps showing a special area where the model’s thought process is displayed (this could be an expanding section with a spinner or animated ellipsis followed by the streamed text). As each thinking:update comes in, we append the text. Once thinking:end occurs, we might either automatically collapse that reasoning display (moving to a collapsed or hidden state) or leave it open until the user toggles it. We want to make this configurable: for casual users, the reasoning might auto-hide once the answer comes, whereas advanced users might keep it open. Then, as answer:update events come in, we show the answer content streaming. Finally, on answer:complete, we transition to a done state, where the UI knows the response is finished.
+We also have to consider non-streaming providers (if any). In that case, we wouldn’t get incremental events. We might simulate the thinking phase – e.g., show a “thinking...” message while waiting for the response – but no actual reasoning text. For consistency, we may still emit a thinking:start when we send the request, and if the provider doesn’t return any reasoning, immediately emit thinking:end and move to final answer. This way our frontend logic doesn’t need separate code paths for streaming vs non-streaming; it just reacts to events.
+Another aspect is ensuring that if multiple tool calls occur or multiple turns of reasoning happen (for instance, an agent using tools in a loop), the UI can handle it. In such cases, the state might go: thinking -> tool -> thinking -> tool -> ... -> answer. We’ll design the events to handle iterative processes too. For example, after executing a tool and sending the result back to the model, the model might think again; we’d emit another thinking:start for the second phase.
+In summary, by using Wails events to separate thinking content and answer content, we can give users insight into the model’s chain-of-thought in real time. The UI will have controls (like an “expand/collapse reasoning” button) for users to toggle visibility. We’ll default to showing it in a brief, auto-collapsing manner (so as not to overwhelm non-technical users), but make it accessible for those who want to inspect it.
+Implementation Notes
+To implement the thinking state visualization: - We will modify our LLM prompts (system prompts) to encourage or require the model to output its reasoning in a marked-up way (especially for models that are not explicitly designed for chain-of-thought). Using <think>...</think> tags is one approach as seen with Qwen. We’ll adopt that as a convention since it’s already in use. - On the backend, for providers like Ollama/Qwen that naturally produce <think> segments, we simply detect those tokens. For vLLM with reasoning_content support, we will receive a separate field and can emit that immediately. If neither is available, we may parse the text stream for our chosen delimiters. - We will implement a ReasoningBuffer in Go: as the streaming response comes in, any content between <think> and </think> goes into the reasoning buffer and triggers thinking:update events. We might not forward the <think> tags themselves to the UI (they are just markers), unless we want to literally show them. We can strip those out. - Once reasoning is done (detected by </think>), we emit thinking:end. If a tool call occurs next, the frontend might momentarily show something like “Executing tool X...” (we can handle that in the tool calling mechanism, possibly as another event or just as part of the thinking or answer stream). - We have to ensure thread-safety and timing of events: the events should be emitted in order. Wails events are asynchronous, but we assume the order of emission will generally be preserved. - On the frontend (React), we will likely use a context or global state (maybe Redux or Zustand, or just React useState in a context provider) to track the current conversation state including any ongoing reasoning text. Each new conversation response can carry its own sub-state (thinking text, final answer text). - We will style the "thinking" content differently (e.g., italic smaller font or a tinted background) to set it apart from the final answer. Possibly we’ll initially show it with a label like “Model’s thoughts...” that disappears or changes when the model switches to the answer. - As a precaution, if the model ever outputs something in <think> that looks like a final answer or a sensitive info leak, we should treat it accordingly (in principle, the model shouldn’t output user-visible content in the <think> block, but we’re showing it to the user anyway for transparency). We will just present it as-is, since the user explicitly wants to see the reasoning (this is an opted-in feature by requirement).
+By implementing the above, the UI will have a dynamic and informative display of the model’s internal reasoning, enhancing transparency and debuggability of the LLM’s responses.
+3. Safe Shell Execution & Sanitization
+Context: REQ-005
+Goal: Prevent malicious command execution while allowing legitimate user tasks. All shell execution is centralized on the backend (invoked from Wails) with strict validation and sanitization.
+Research Questions
+•	Cross-Platform Sanitization: We need a strategy to run shell commands on different OSes (Windows, Linux, macOS) safely. In Go, the recommended approach is to avoid invoking the system shell (like bash or cmd.exe) with untrusted input. Instead, use os/exec to call the desired executable directly with arguments, as this bypasses shell parsing of special characters. For example, rather than exec.Command("sh", "-c", userInput), which would hand userInput to a shell (dangerous), we do exec.Command("git", "clone", repoURL) passing each argument separately. This way, meta-characters (&, ;, ||, > etc.) are not treated specially – they are just part of an argument string and won’t trigger shell control operations. We will apply this method on all platforms. On Windows, that means if we want to run something like a PowerShell command, we might directly call the PowerShell executable with parameters rather than via system() or similar. We also should be mindful of how different shells interpret quotes and escapes. Fortunately, by providing args to exec.Command, Go handles appropriate escaping internally (for Windows, it creates the process directly via Win32 APIs, and for Unix, it fork/execs without a shell). This significantly reduces injection risk.
+We will define an internal representation for commands to enforce this separation. For instance, a struct CommandTask { Path string; Args []string } could be used so that any function that wants to run something must provide a concrete path (or command name, which we will resolve to a path via exec.LookPath) and an array of arguments. Under the hood, we then call exec.Command(Path, Args...). This design means we won’t accidentally concatenate a command string. It also forces us to think about what exactly is being executed.
+We have to account for platform specifics: - On Linux/macOS, many utilities (ls, cp, etc.) are available and have similar syntax. But on Windows, commands like dir or del are built into the shell and not standalone executables. For those, we might use PowerShell equivalents (e.g., Get-ChildItem instead of dir) or use cmd /c only for these known cases after careful validation. If we do need to invoke cmd.exe /c or powershell -Command, we will treat that invocation with the same level of input sanitization as any other, because at that point we are passing a string to a shell. - File paths differ (C:\ on Windows vs / on Unix). We should sanitize those as part of arguments, but using exec with separate args largely avoids issues with spaces or special characters in paths (they won’t get expanded or globbed because no shell is expanding them).
+In summary, our cross-platform strategy is: prefer direct execution with arguments; minimize usage of actual shell interpreters; and ensure our command construction code is common and applies escaping rules appropriate to each OS (Go’s exec handles most escaping; we mainly ensure we don’t introduce a shell layer inadvertently).
+•	Validation Logic: Even with the above precautions, we need an extra layer of defense: validating the content of commands and arguments to prevent harmful operations. There are two approaches, which we can combine:
+•	Whitelist (Allow-list): Maintain a list of allowed commands and maybe allowed argument patterns. For example, we might decide that only certain system commands can be run (like git, ls, ping, etc., or custom scripts we provide). If a requested command isn’t on the list, we reject it. This is very secure but reduces flexibility. Some systems do this; for instance, openHAB’s Exec binding requires each command to be pre-whitelisted in a config file.
+•	Blacklist (Deny-list) of dangerous flags/usage: For commands that are allowed, we can still forbid certain arguments. For example, if rm is allowed (maybe for deleting user-generated files), we absolutely would block rm -rf / or rm -rf C:\ (anything targeting root directories). We can specifically check for patterns like an argument that is just "/" or "C:\" and reject those. We should also forbid --no-preserve-root flag for rm (which is a flag specifically to allow deleting /). Similarly, if we allow something like format or mkfs, we would restrict it heavily (most likely we won’t allow those at all).
+Additionally, even though using exec bypasses shell operators, we should detect and prevent attempts at shell injection. For instance, if a user input contains a semicolon or &&, it might be that they tried to chain commands. While this would not execute in our approach, it likely indicates misuse or malicious intent. We can proactively reject inputs containing such characters to be safe. The StackHawk article shows how an input like John & whoami > file could be problematic if directly passed to a shell. In our case it wouldn’t execute, but we don’t want to even allow that string to reach exec.Command because it’s clearly not a normal argument (and if someday a developer mistakenly uses sh -c, it becomes an issue). So, we will validate each argument string: disallow characters like ; & | $ < > unless there’s a legitimate reason (for example, a URL might contain & as query param – we have to handle that carefully in context).
+Another vector is subprocess invocation within arguments, like passing something to a program that gets executed. For example, find . -exec rm {} \; – here the -exec isn’t dangerous by itself since we’re not using a shell, but if we allowed find with arbitrary args, a user might try to use it to delete files. Our whitelist/blacklist needs to account for such cases per command. This gets complicated, which is why we might lean more on whitelisting specific tasks rather than raw commands.
+We also need to consider environment variables and current working directory. A malicious input might not just be in arguments but could attempt to influence execution via env (though we control env in exec, it inherits from our process by default). We will likely not allow untrusted input to specify environment variables for the command.
+The output and side-effects of commands are also a concern (though out of scope of injection, it’s about safety). For example, if a user requests a command that writes a file, we should have checks for where it writes. Perhaps run everything in a sandbox directory. Or if allowing network commands, maybe restrict them or at least warn the user.
+Finally, when a violation is detected (say our validation logic flags something), how do we surface it? We should not print the raw command in an error to the UI (to avoid any potential social engineering or confusion), but we can return a generic error like “Command not allowed” or a specific one like “Unsafe command blocked”. This will be handled in the frontend by showing an error message, rather than executing anything risky.
+•	Interaction Model with the Frontend: We will expose a controlled API for the frontend to request shell actions. Instead of a general exec(commandString) method, we use higher-level functions. For example, we might have a Wails method RunShellTask(name string, params map) where name is an identifier for the task the user/AI wants to do (like “list_files” or “check_disk”) and params contains any parameters (like a directory path). The backend then maps name to a predefined command template. This is akin to defining an RPC for allowed operations rather than exposing a raw shell. This way, if an AI suggests “Run rm -rf /”, our system would not even have a task for “delete_folder” at root, or if it does for user folders, it would validate the parameter and reject root. The frontend could also present these tasks in a more user-friendly manner (with confirmations as needed).
+However, the requirement says “full shell command support”, which implies the user might be able to ask the AI to run arbitrary commands, not just a fixed set. In that case, our approach would be: the AI outputs a command (string), the frontend sends it to a ExecuteCommand(command string) endpoint, and then the backend applies all the sanitization rules discussed. If the command is allowed, it executes it and returns the output (or streams the output); if not, it returns an error.
+We will likely implement both modes: a safe curated set of commands for most features (to minimize risk) and an expert mode that can run arbitrary commands with confirmations. - For commands that modify files or system state, we will require explicit user confirmation. For example, if an AI says “I will now delete all temp files by running rm -rf /tmp/*”, we intercept that and prompt the user in the UI: “Allow the assistant to execute rm -rf /tmp/*? [Yes/No]”. Only if the user clicks Yes will we proceed. This confirmation will be in addition to automated checks (and some commands might be outright forbidden regardless of confirmation, such as wiping system directories). - For network access, similarly, we might confirm (“The assistant wants to ping 8.8.8.8, allow?”). Network pings are probably fine, but something like starting a netcat listener might be dangerous. - If elevated privileges would be required (e.g., the AI tries a sudo command), we won’t allow that (our app won’t be running as root, and we’re not going to provide a way to escalate).
+We will implement logging for executed commands too, so we have an audit trail of what was run, making debugging and security auditing easier.
+Implementation Notes
+Given the above considerations, our implementation plan: - Central Command Executor: A single Go module that all shell requests funnel through. It will expose methods to the rest of the app like ExecCommand(cmd string) (output, error) or perhaps asynchronous execution if needed. - Sanitization Checks: Before running anything, parse the input. We’ll likely break the input string into tokens (maybe using a shell parser library or a simple split by whitespace while respecting quotes). Then apply rules: - Disallow empty commands. - Check the executable name against an allow-list. The allow-list might be defined in config (so it can be adjusted). For instance, allow ["ls", "echo", "git", "ping", "curl"] etc., and disallow anything not in the list. Initially, since requirement says full shell support, we might keep this list broad but still exclude truly dangerous things (rm might be allowed but with heavy restrictions, whereas something like mkfs we might outright exclude). - Examine each token for illegal characters. We can define a regex of allowed patterns for arguments (e.g., alphanumeric and common symbols, but no ;|&). If something fails, reject. - Special-case certain commands: - If the command is rm or similar, check for /* or critical paths. - If the command is docker or others that could be risky in CI or user system, maybe warn or restrict. - If the command is a shell (sh, bash, cmd, powershell) and they are trying to pass -c with a compound command, we identify that and decide if it’s allowed. Likely, we won’t allow arbitrary sh -c through the AI without human confirmation because that defeats our tokenization checks. - Use context: We know the app’s working directory or allowed file areas. We could forbid any command whose argument refers to C:\Windows or C:\Users\YourUser (system areas) or /etc, etc., unless explicitly whitelisted.
+•	Execution: If the command passes validation, we run it via exec.Command. We will capture stdout and stderr. The result will be returned to the AI/user. If it’s a long-running command, we might need to run it asynchronously and stream output back. But since this is a desktop app, maybe we can assume most commands finish quickly or we handle streaming if needed (Wails can stream data via events or by chunking output in multiple messages).
+•	User Confirmation Workflow: We will integrate a confirmation dialog in the frontend. The backend can return a special error code or message like “CONFIRM NEEDED: <command>”. The frontend, upon seeing this, will pause execution and prompt the user. If the user confirms, the frontend calls the backend again with an override flag (or we store the command and on confirm we execute it).
+•	Alternatively, the backend could hold the command and raise an event to the UI asking for permission. But that complicates state handling. Simpler might be frontend triggers all confirms.
+•	No-Destructive-Root Rule: Specifically implement a check that if any command tries to operate on the root directory in a destructive way, block it. This covers rm -rf /, but also things like mv / /backup (which doesn’t make sense but just in case). We’ll maintain a list of forbidden path patterns (like a regex that matches just "/" or "\" or perhaps attempts to delete system32 on Windows).
+•	Testing: We will test our executor with a variety of inputs to ensure that benign commands work (including ones with spaces, quotes in arguments, etc.) and malicious examples are caught. For example, test that touch "hello; rm -rf /".txt actually just creates a file with semicolon in name (which is weird but possible) and doesn’t delete anything, and possibly our validator might reject such a filename if it’s too suspicious. Balance needed between security and functionality (maybe a user genuinely has a file with a semicolon in its name – rare, but possible).
+In conclusion, our shell execution will be tightly controlled: direct execution, strong validation, optional user confirmation for risky actions, and clear boundaries on what can be done. This ensures we fulfill the “full shell command support” (the user can do a lot) while heeding “just no destructive action on the root folder” – and, by extension, no destructive actions anywhere outside intended scope.
+4. E2E Testing Infrastructure (Wails + Local LLMs)
+Context: REQ-007, REQ-008
+Goal: Reliable CI/CD pipeline that validates the full Wails application flow, including local LLM integration.
+Research Questions
+•	GitHub Actions Caching (Ollama Models): One challenge is that our CI (GitHub Actions runner) may need to download potentially large model files (e.g., the Qwen-3 4B model) for testing the LLM integration. To avoid re-downloading on every run, we will use caching. By default, Ollama stores models in ~/.ollama/models (on Linux, that might be /home/runner/.ollama/models). We can leverage the actions/cache action to preserve this directory between runs. We’ll set the cache key to something like ollama-models-{modelName}-{version} so that if we change the model or Ollama version, the cache invalidates. This should dramatically speed up CI when the same model is reused across test runs. Additionally, if we have multiple models, we might selectively cache only the ones we use in tests to keep the cache size manageable. If GitHub’s cache size limits (currently ~5GB) are an issue and the model is bigger, we may need to find alternatives such as storing the model on an external storage and downloading it (which might not be faster). But Qwen-3 4B and similar should fit in a cache.
+Another trick: We could pre-pull the model in a build step and then save it as an artifact or attach it to a self-hosted runner. But using the built-in cache is simpler and automated. We just need to ensure to cache the entire model directory (which includes model files and manifests) or at least the .bin file(s). We will also add a step in the workflow to output ollama models and confirm the model is present from cache.
+•	Service Orchestration (Ollama / vLLM + Wails App): To test E2E, we need the LLM service running alongside the Wails application. There are a few approaches:
+•	Run as a background process in a step: We can install Ollama in the CI (on Ubuntu, run the official installation script), then run ollama serve in the background. For example, use & to background it in a bash step. After that, we should wait until the server is ready. Ollama’s CLI doesn’t have an explicit “ready” signal, but one approach is to poll http://localhost:11434 (the default API port) until it responds. In the Actuated blog example, they hit the root URL which blocks until readiness. We can do the same or hit the /version endpoint if one exists. Once ready, we proceed to tests.
+•	Use GitHub Actions services: This is where we specify a container image in the workflow that runs automatically. If there were a Docker image for Ollama (with the model), we could do services: ollama: image: .... However, Ollama with GPU in a container is non-trivial, and GitHub’s runners don’t have GPUs by default. CPU is okay for small models. We might skip container services for Ollama and just run it directly as above.
+•	vLLM: If we decide to test vLLM integration similarly, we would pip install vllm and run vllm serve with a small model (maybe a 7B model in half precision). vLLM will also need model weights – possibly we can cache those too (~4GB for 7B). vLLM can run in CPU mode, though slowly. We may in CI choose to use only Ollama (since that covers the local model scenario; vLLM integration might be tested with the same model or separate unit tests).
+•	We could also consider using a lightweight dummy LLM server for CI (to simulate responses quickly), but that wouldn’t fully test real integration. Better to use a real model but perhaps a tiny one (like a 3B or even smaller if available for quick responses).
+Ensuring the model is loaded/warm: Ollama loads the model on first request. We can explicitly run ollama pull modelName during setup to make sure the model is downloaded. If we want to warm it up (so that the first query in tests isn’t extra slow), we might do a quick ollama generate or chat with a simple prompt and discard the result. This is optional, as our tests can handle a one-time delay.
+In summary, the CI workflow will have steps like: 1. Setup Go, Node (for building the app). 2. Install Ollama (maybe cached). 3. Cache restore for model. 4. ollama pull model (if not cached or to verify). 5. Start Ollama serve in background. 6. Run Wails app tests.
+If tests involve the Wails UI, see next points for that orchestration.
+•	E2E Flow for the Wails App: The key question is how to run the Wails app in CI and interact with it. Wails is a desktop app (with GUI), which complicates automated testing on a headless CI server. We have a few strategies:
+•	Headless Mode / Simulation: One idea is to run the backend and frontend separately. Since our frontend is a React app, we can build it for web and serve it with a regular web server (or use the dev server as in development). If we modify the app slightly for test (for example, have an option to run the backend API in HTTP mode instead of the embedded WebView RPC), we could then use a browser automation tool (Playwright or Cypress) to control the front-end in a normal browser. The front-end would call the backend via HTTP requests in this scenario. However, Wails normally communicates via an internal RPC (webview <-> Go methods). We might need to add a fallback to REST or WebSocket RPC for testing. This is a significant change just for testing, so we have to weigh it.
+•	Automate the embedded WebView: Another approach is to actually launch the Wails app binary in the CI environment with a virtual display and then use automation to control it. On Linux, we could use XVFB (X Virtual Framebuffer) to run the app in a headless X11 session. Then use a tool like Playwright’s ability to connect to a WebView2 or WebKit debugger. On Windows, the app uses WebView2 (Edge); Playwright can automate WebView2 if the app is launched with a debugging port open. The Wails maintainer mentioned it’s not supported by default in v2, but you can patch it or v3 might support it. If we can launch the app with an environment variable like WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222", then Playwright could attach to that port as if it’s a Chrome instance. We’d then script interactions (click this button, type in this field, etc.).
+There are reports of developers doing E2E by launching the Wails backend and pointing a real browser to the dev server URL when using wails dev in a special mode[2]. For example, with Create React App, Wails can be configured to serve the UI from http://localhost:3000 during development, which means you can open that in Chrome and it will talk to the Go backend via WebSockets[2]. In CI, we could replicate that: run wails dev (which would spawn the backend and also require a frontend dev server). Actually, wails dev might attempt to open the app window, which we don’t want. We might instead manually start the CRA dev server (yarn start for the React app) and concurrently run the Go backend in a mode where it doesn’t open a window but connects to the dev server (perhaps setting -browser or using the -devserver config as per Wails docs). The Wails docs show how to use frontend:dev:serverUrl in wails.json to have the Go runtime load an external URL[3][4]. This is intended for using Chrome to debug the app, but we can use it for testing: the Go backend will act like a server for the RPC, and we can use a normal browser automation on the dev URL. We will have to ensure the Wails runtime scripts are injected (the docs mention adding runtime.js and ipc.js scripts manually in this scenario)[4].
+If the above is too complex, a simpler albeit less “true E2E” approach is: - Test the backend logic with unit tests (simulate calls to the Go methods for LLM query, shell execution, etc., perhaps using a dummy front-end or direct function calls). - Test the front-end with component tests or a mocked backend. For example, spin up a fake backend server that mimics the Wails API (or actually use the real Go backend but via HTTP as a REST server in test mode), and run the React app in a headless browser to simulate user interactions.
+However, since the requirement is to validate the full Wails application flow, we’ll aim for at least one integration test where the actual app is run and an automated agent interacts with it. We may not cover every UI edge case, but a smoke test like “the user can enter a prompt and get a response from the model” is crucial.
+Using Playwright: We can use Playwright in Node (or Python) to script: 1. Launch the Wails app. If on Linux, use xvfb-run to launch it invisibly. 2. If using remote debugging, connect to the WebView as a browser and get a Page handle. 3. Then simulate: find the input textbox element, type a question, press enter (or click send). 4. Await for the response to appear in the DOM. Verify it contains expected text (for a known query). 5. Optionally, verify that the “thinking” panel behaved (maybe check that some thought text appeared if model supports it). 6. Close the app.
+If WebView remote debugging is not easily usable, an alternative: run the front-end in normal Chrome (pointing to localhost:3000 as above) and have it talk to the backend. Playwright can control Chrome easily. We just need to ensure the React app is loaded and can reach the backend’s functionality. Possibly, if the Wails backend is running, the ipc.js might connect via WebSocket to it (over localhost on some port that Wails uses internally, usually a random free port). We might have to expose that or configure it. This approach would be pushing the boundaries of what Wails normally does, but it’s not impossible.
+Lastly, consider platform: Our CI likely will run on Ubuntu (for convenience and because we can easily use xvfb). Even though final app is for Windows, testing on Linux with a Linux build of the app is fine for logic and integration. Wails is cross-platform, so if it works on Linux in CI, it likely works on Windows, barring any OS-specific code we have (which we will also test separately if needed).
+•	Fixtures (Mocking vs Real LLM calls): In E2E tests, relying on actual model responses can introduce nondeterminism (LLMs might not give exactly the same answer every time) and slowness. We should design our tests to mitigate this:
+•	For most E2E flows, we can mock the LLM. For example, have an environment variable that if set, our backend doesn’t actually call Ollama but instead returns a canned response. We could code a simple stub: if LLM_MOCK=1, then when the backend’s chat function is called with prompt “Hello”, it returns a fixed reply “Hi there” (and maybe if a tool is present, return a fixed tool call for testing that path). This allows fast, predictable tests of the UI logic (like ensuring the UI displays the response).
+•	We still want at least one test with the real model to catch integration issues (like maybe the model output format changed). This could be a “smoke test” that runs a very simple prompt through the actual model. We will choose a prompt that yields a short deterministic answer (maybe a math question like “1+1?” where the model will always answer “2” or a fixed fact). Using a small model also helps ensure it’s deterministic and fast.
+•	We might also test the shell execution in an isolated way: e.g., have the AI generate a benign command (echo Hello) and let it run, then verify the output. For safety, in CI we will ensure any shell commands run by the test are non-destructive (we wouldn’t, for instance, actually run a delete command in CI).
+Overall, our testing strategy will mix fast simulated tests (for UI/UX flows with predictable responses) and slower integration tests (one or two, to verify real interactions with Ollama and possibly the shell). We will mark or separate the latter so that if they fail due to external flakiness, we can troubleshoot without blocking all test feedback.
+Implementation Notes
+We will create a GitHub Actions workflow (YAML) for these E2E tests. Key implementation steps: - Install dependencies: Use actions/setup-go to get Go (for building backend) and maybe actions/setup-node for frontend if needed. Use actions/cache to restore .ollama model data and perhaps node_modules for the React app build. - Build app: Decide whether to use wails build or not. For testing, we might not need a packaged binary; we could use wails dev -verbose in combination with frontend:dev:serverUrl. But if we manage to do the WebView automation route, we’ll do a wails build -debug -devtools to get a binary that includes debug info and allows devtools[5][6]. The -devtools flag might let us open devtools (or attach) even in production mode[5][6]. - Start LLM service: As discussed, run ollama serve & and poll for readiness. - Run tests: If using Playwright, we’ll need to install Playwright (which can be done via npm or via the Playwright GitHub Action). Playwright has an action that sets it up and allows us to run tests with its own context. Alternatively, we script it within a Node script in the workflow. - Xvfb: On a Linux runner, to run the Wails app (which is a GUI app), we use xvfb-run prefix for the command or use the Xvfb action to start a virtual display. Then launch the app pointing to that display. We have to ensure it doesn’t try to open system dialogs or anything that could hang. - WebView2 debug (if Windows): If we attempted on a Windows runner, we’d have to figure out enabling the debug port and then connecting. That’s possible but perhaps more error-prone on GitHub’s Windows runner, and also the runner might not have a UI session by default. So likely stick to Linux + WebKit. - Tearing down: After tests, ensure we kill the Ollama process and the Wails app. The workflow will likely handle it when the job ends, but we might explicitly kill to be polite (maybe not critical). - Parallel or Matrix testing: Possibly we could run a matrix to test multiple providers or multiple OSes (like a job for Linux/Ollama, and one for maybe Windows/OpenAI if relevant). But initially, focus on one environment.
+Finally, include this E2E in our CI pipeline (possibly not on every commit if it’s heavy – maybe nightly or on specific branches). Since requirement mentions CI/CD, we want it automated on at least every push to main.
+By implementing this, we gain confidence that: - The local LLM (Ollama) is correctly integrated (server starts, model loads, answer returns). - The UI can send a query and display the model’s answer (and thoughts). - The shell execution, if part of the flow (maybe triggered by a tool use), works and is safetied.
+All of these in an automated test gives us a safety net as we develop.
+5. Provider Abstraction Layer
+Context: REQ-009
+Goal: Switch between LLM providers without changing application logic or frontend code.
+Research Questions
+•	HTTP Client & Provider Abstraction: We plan to support multiple backends (Ollama, vLLM, possibly OpenAI or others) that adhere to similar yet slightly different APIs. To avoid littering the code with if (provider == X) ... else ..., we’ll define an interface (in Go) for LLM interactions. For example, something like:
+type ChatProvider interface {
+    Name() string
+    SupportsStreaming() bool
+    SendChat(messages []Message, tools []Tool, stream bool) (ChatStream, error)
 }
-```
-
-Where:
-
-* `ChatRequest` is our **provider-neutral** request:
-
-  ```rust
-  pub struct ChatRequest {
-      pub model: String,
-      pub messages: Vec<ChatMessage>,
-      pub tools: Vec<ToolDefinition>,
-      pub tool_choice: Option<ToolChoice>,
-      pub enable_thinking: bool,
-      pub temperature: Option<f32>,
-      // ...
-  }
-  ```
-
-* `LlmStreamEvent` is the unified stream event enum described earlier.
-
-Concrete implementations:
-
-* `OllamaProvider`:
-
-  * Uses reqwest against `/api/chat`.
-  * Converts `ChatRequest` to Ollama’s schema (`messages`, `tools`, `think`, etc.).
-  * Maps each NDJSON chunk into `LlmStreamEvent`.
-
-* `VllmProvider`:
-
-  * Uses `async-openai` with a config whose `api_base` points to `http://localhost:8000/v1`.
-  * Converts `ChatRequest` into an OpenAI `ChatCompletionRequest`.
-  * Handles streaming with tool calls + optional reasoning as per section 1 and 2.
-
-Provider selection:
-
-```rust
-pub enum ProviderKind {
-    Ollama,
-    Vllm,
+Each implementation (OllamaProvider, OpenAIProvider, VLLMProvider) will implement SendChat. The Wails backend can have a factory or configuration that chooses the appropriate provider based on a setting. The ChatStream returned could be a common interface that our code uses to read chunks (hiding whether it’s SSE, chunked JSON, etc.). Under the hood: - OllamaProvider: Would call Ollama’s REST endpoints (e.g., POST /api/chat or using the Ollama Go SDK). It will format the request with messages, and if tools are present, include them. It will handle both streaming and non-streaming cases (Ollama supports a stream: true flag). For streaming, it might open an HTTP connection and yield chunks as they arrive. - OpenAIProvider (or vLLMProvider): Would call the OpenAI-compatible endpoint (could be actual OpenAI or a local vLLM server). The request format is similar but not identical (for instance, OpenAI uses messages and functions instead of tools). We’d translate our tools list to OpenAI’s functions field if needed. Also OpenAI expects either function_call: "auto" or so – for vLLM we set tool_choice: "auto". We can include these conditionally in the provider implementation.
+Configuration: We will have entries in a config file or environment variables like PROVIDER=ollama or PROVIDER=openai. Also needed are provider-specific settings: - For OpenAI: API key, API base URL (could be api.openai.com or a proxy). - For vLLM: base URL (like http://localhost:8000/v1 if self-hosted), no key needed usually if local. - For Ollama: base URL (http://localhost:11434 by default), perhaps a dummy API key if using OpenAI SDK (like we saw they often use api_key = 'ollama' just to satisfy interface).
+We’ll likely create a unified config struct where each provider’s details can be filled from a JSON or env. For example:
+{
+  "provider": "ollama",
+  "ollama": { "host": "http://localhost:11434" },
+  "openai": { "api_key": "...", "model": "gpt-3.5-turbo" },
+  "vllm":  { "host": "http://localhost:8000", "model": "qwen-7b" }
 }
-
-pub struct ProviderRegistry {
-    ollama: Arc<dyn LlmProvider>,
-    vllm: Arc<dyn LlmProvider>,
+Only the section for the selected provider will be used. This config can be loaded at startup and the appropriate ChatProvider is instantiated.
+We will also handle timeouts/retries in the provider layer. For example, set a reasonable timeout for the HTTP requests (maybe 60 seconds for a full reply). If a request fails due to network error, maybe retry once or twice for OpenAI (since network issues can occur). For local providers, if they error out quickly, retries likely won’t help unless it’s a transient issue.
+•	Normalizing Capabilities: Different providers have different features. We want the UI to be aware of what’s available. Some differences:
+•	Tool calling: OpenAI and Ollama support function/tools. Some providers might not (imagine using a raw HuggingFace model without such support). We should indicate if tools are usable.
+•	Streaming: Most we consider do streaming, but if one didn’t, we’d handle it. We can expose a flag supportsStreaming so the UI knows whether to expect incremental updates or if it will just get one final chunk. For example, if a provider had no streaming, our backend could internally fake a stream by not sending anything until completion (or just send a single event). But the UI might show a spinner rather than token-by-token in that case.
+•	Thinking/Reasoning: This is more model-specific than provider, but we might treat it as a capability. E.g., “Qwen (via vLLM) supports reasoning” vs “GPT-3.5 does not output reasoning”. However, since we might enforce reasoning via prompts for consistency, we might not need to expose this – we could always attempt to get reasoning and see if anything comes.
+Nonetheless, it’s useful for the UI to know if the current provider can do certain things. One simple way: when the app starts, the backend can send a config object to the frontend (maybe as part of an initialization call or event) that says { streaming: true, tools: true, reasoning: "partial" } etc. Or we can derive it from provider type: - Ollama: supports tools (as of versions after July 2024), supports streaming, supports reasoning output if model does (some models like Llama 3.1 might not output chain-of-thought unless prompted). - OpenAI API (with GPT-4/3.5): supports tools (function calling), supports streaming, does not willingly output its chain-of-thought (OpenAI’s models are trained not to reveal their reasoning unless it’s a function argument). So for “thinking”, our chain-of-thought feature may not work with OpenAI GPT-4 unless we use a special system prompt (which might violate OpenAI policy if not careful). So we might mark supportsThinking: false for OpenAI to disable that UI or use a different approach (maybe we simply don’t show reasoning for OpenAI, or only show a placeholder like “(Model reasoning hidden)”). This is an important difference. - vLLM: if using Qwen, supports reasoning and tools; if serving a basic model without those capabilities, then not.
+So perhaps we extend our config to have per-model or per-provider flags. The backend likely knows which model is loaded (e.g., if provider is Ollama, we know the model name we requested; we could maintain a list of known models that support tools or thinking). For generality, we might treat “capabilities” as part of provider config: e.g., config file could say "ollama": { ..., "capabilities": {"tools": true, "thinking": true} }. But it’s better to auto-detect if possible (maybe call an endpoint or have a metadata API).
+In absence of automatic detection, we will hardcode some logic: provider type gives base capabilities, and we can have a override table for specific model names. This is a bit hacky but workable (e.g., if model name contains “GPT-” then thinking = false; if contains “Qwen” then thinking = true).
+•	Error Handling & Observability: We want a uniform way to handle errors from any provider. That means catching HTTP errors or timeouts in the provider implementation and converting them to a generic error type. For example, define an error struct LLMError { Code string; Message string; Provider string; Retryable bool }. If OpenAI returns a 401, we map that to Code=AUTH_ERROR, Message="Invalid API key". If Ollama returns a 500 (maybe model not found), Code=SERVER_ERROR, etc. These can be logged and also perhaps shown to the user in a friendly way (e.g., “The AI engine is currently unavailable. Please check that the server is running.”).
+We will implement logging such that regardless of provider, we log key events: request sent (maybe with prompt length), response received (time taken, tokens generated). If the provider supplies usage data (OpenAI gives token counts in the response), we can log or accumulate that. For local providers, we might approximate token counts by counting message content tokens via our tokenizer if needed. Logging will help us monitor performance and catch issues. For instance, we could compute average response time for each provider and decide if one is lagging.
+For telemetry or UI display, we might show a small status indicator. Perhaps a “Server: Connected (Ollama)” text in a footer, which could turn red or show “Disconnected” if we detect an error communicating with it. We can implement a lightweight health check on startup: when the user selects a provider (or at app launch for the default provider), do a quick test (like GET /version on Ollama or a cheap completion on OpenAI) to ensure it works. If it fails, notify the user (“Cannot reach Ollama at localhost:11434” or “Invalid OpenAI API key”). This proactive check can save the user from waiting on a prompt only to get an error.
+Additionally, we might allow switching providers at runtime via the UI (a setting panel). In that case, when the user switches, we re-initialize the ChatProvider and possibly run a test call to confirm availability, updating the UI accordingly.
+Overall, the abstraction layer’s purpose is to isolate all these differences in one part of the code. The frontend and main logic will just call high-level methods like askQuestion(questionText) and get back structured answers/tool calls, without needing to know which service answered. This makes the app extensible — tomorrow if we add, say, an Azure OpenAI provider, we just implement the interface for it and plug it in.
+Implementation Notes
+We will implement a Provider Manager in the backend: - It will read configuration (perhaps a JSON or environment as described) at startup. - Instantiate the appropriate ChatProvider. - Provide global functions like SendUserMessage(messages, tools) that internally call currentProvider.SendChat(...). - This manager will also hold the capability flags. We might create a small struct like:
+type ProviderInfo struct {
+    Name string
+    SupportsTools bool
+    SupportsStreaming bool
+    SupportsReasoning bool
 }
-
-impl ProviderRegistry {
-    pub fn get(&self, kind: ProviderKind) -> Arc<dyn LlmProvider> {
-        match kind {
-            ProviderKind::Ollama => self.ollama.clone(),
-            ProviderKind::Vllm => self.vllm.clone(),
-        }
-    }
-}
-```
-
-Tauri command:
-
-```rust
-#[tauri::command]
-async fn chat_route(
-    provider: ProviderKind,
-    request: ChatRequest,
-    state: tauri::State<'_, ProviderRegistry>,
-) -> Result<(), String> {
-    let prov = state.get(provider);
-    let mut stream = prov.chat_stream(request).await.map_err(|e| e.to_string())?;
-    // Emit events as in Section 1
-    Ok(())
-}
-```
-
----
-
-### Implementation Notes (To be filled)
-
-**Implementation Notes**
-
-* Backend:
-
-  * Implement `OllamaProvider` and `VllmProvider` behind `LlmProvider`.
-  * Use `async-openai` only for the OpenAI-compatible side (vLLM, optionally Ollama’s `/v1`).
-  * For thinking:
-
-    * `OllamaProvider` sets `think: request.enable_thinking`.
-    * `VllmProvider` maps `enable_thinking` into the correct reasoning model/extra params, if available.
-
-* Frontend:
-
-  * Treat the backend as a **single logical provider**:
-
-    * React only knows about `ChatRequest`, `ProviderKind`, and `LlmStreamEvent`.
-    * Provider details are hidden in Rust.
-
-* Testing:
-
-  * For unit tests, inject a fake `LlmProvider` that emits deterministic `LlmStreamEvent` sequences.
-  * For integration tests, spin up both Ollama and vLLM, then run the same tool-calling tests against both and assert we get equivalent internal `ToolCall` structures.
-
----
-
-```
-::contentReference[oaicite:51]{index=51}
-```
-
-[1]: https://ollama.com/blog/streaming-tool "Streaming responses with tool calling · Ollama Blog"
-[2]: https://docs.ollama.com/capabilities/streaming "Streaming - Ollama"
-[3]: https://docs.vllm.ai/en/v0.8.3/serving/openai_compatible_server.html "OpenAI-Compatible Server — vLLM"
-[4]: https://docs.vllm.ai/en/stable/examples/online_serving/openai_chat_completion_tool_calls_with_reasoning/ "OpenAI Chat Completion Tool Calls With Reasoning - vLLM"
-[5]: https://docs.ollama.com/capabilities/thinking "Thinking - Ollama"
-[6]: https://docs.rs/shlex/latest/shlex/ "shlex - Rust"
-[7]: https://docs.rs/shell-escape "shell_escape - Rust"
-[8]: https://docs.rs/xshell/latest/xshell/?utm_source=chatgpt.com "xshell - Rust - Docs.rs"
-[9]: https://deepwiki.com/tauri-apps/tauri-plugin-shell/4-security-and-permissions?utm_source=chatgpt.com "Security & Permissions | tauri-apps/tauri-plugin-shell | DeepWiki"
-[10]: https://internals.rust-lang.org/t/std-process-on-windows-is-escaping-raw-literals-which-causes-problems-with-chaining-commands/8163?utm_source=chatgpt.com "Std::process on windows is escaping raw literals which ... - Rust Internals"
-[11]: https://users.rust-lang.org/t/std-process-is-escaping-a-raw-string-literal-when-i-dont-want-it-to/19441?utm_source=chatgpt.com "Std::process is escaping a raw string literal when I don't want it to"
-[12]: https://github.com/ollama/ollama/issues/1737?utm_source=chatgpt.com "Where is ollama storing models? · Issue #1737 - GitHub"
-[13]: https://stackoverflow.com/questions/79444743/how-to-change-where-ollama-models-are-saved-on-linux?utm_source=chatgpt.com "How to change where OLLAMA models are saved on linux"
-[14]: https://www.igoroseledko.com/relocating-ollama-models-folder-in-windows/?utm_source=chatgpt.com "Relocating Ollama Models Folder in Windows - Igor Oseledko"
-[15]: https://docs.ollama.com/windows?utm_source=chatgpt.com "Windows - Ollama"
-[16]: https://stackoverflow.com/questions/78486506/ollama-running-with-github-actions "docker compose - Ollama running with Github actions - Stack Overflow"
-````
+which the frontend can query via a Wails method GetProviderInfo().
+For each provider implementation: - OllamaProvider: Use Go’s http or the official Go SDK (if one exists; the blog mentioned a Go SDK by the founder). We’ll stream the response by reading the response body line by line (since Ollama streams JSON objects separated by newlines). We’ll decode each JSON chunk into our internal ChatChunk structure (with role, content, etc.) and push it through an event or channel. - OpenAIProvider: Use OpenAI’s HTTP API. Possibly use OpenAI’s Go client if convenient, or just build HTTP requests manually (to avoid adding big dependencies). We’ll include the function_call and functions fields as needed. For streaming, we’ll use the SSE stream and parse data: lines. This is well-documented by OpenAI. - VLLMProvider: Since it’s OpenAI-compatible for the most part, we might not need a separate implementation if we run vLLM in OpenAI mode (we’d just point the OpenAIProvider to base_url = vllm_server). But if we wanted to use vLLM-specific features (like tool_choice or reasoning_parser), we may have to tweak the payload. This could be done via config: e.g., a config flag that if provider == vllm, add "tool_choice": "auto" and possibly handle reasoning_content in responses.
+We will thoroughly test each provider in isolation to ensure our abstraction doesn’t lose any information. For instance, ensure that if Ollama returns multiple tool_calls (in a hypothetical scenario where model decides to call several tools sequentially in one go), our code can handle it (very rare; usually it will call one at a time). Or if OpenAI returns a function call and no message content, we treat it the same as Ollama’s case.
+By organizing the code this way, if in future we drop one provider or add another, the impact on the code is minimal. The frontend remains unchanged, and the backend changes are confined to the new provider class and possibly some wiring in the manager. This abstraction layer is key to fulfilling REQ-009’s intent of easily switching LLM backends.
+________________________________________
+[1] Tool Calling - vLLM
+https://docs.vllm.ai/en/latest/features/tool_calling/
+[2] [3] [4] Application Development | Wails
+https://wails.io/docs/guides/application-development/
+[5] [6] CLI | Wails
+https://wails.io/docs/next/reference/cli/

@@ -2,45 +2,43 @@
 
 ## Project Overview
 
-**shell-werk** is a desktop application built with Tauri that provides a chat interface for interacting with Local Large Language Models (LLMs) such as Ollama and vLLM. A key focus of the project is enabling LLM tool calling and cross-platform shell execution (Windows & Linux).
+**shell-werk** is a Wails (Go) + React desktop app for local LLM chat with safe tool calling and shell execution. Project config lives in `wails.json`.
 
 ## Tech Stack
 
-- **Framework**: [Tauri v2](https://v2.tauri.app/)
-- **Backend**: Rust
-- **Frontend**: React 19, TypeScript, Vite 7
-- **Package Manager**: Yarn
+- **Backend**: Go 1.23, Wails v2.11
+- **Frontend**: React 18, TypeScript 4.6, Vite 3
+- **Package Manager**: npm (CI uses Node 20)
+- **Testing**: Go tests; Playwright for end-to-end
 
 ## Project Structure
 
-- **`src/`**: Frontend source code (React components, assets, styles).
-- **`src-tauri/`**: Backend source code (Rust, Tauri configuration).
-  - `src-tauri/src/lib.rs`: Main entry point for Tauri commands and setup.
-  - `src-tauri/tauri.conf.json`: Main Tauri configuration.
-- **`docs/`**: Project documentation.
-  - `docs/requirements/`: Individual requirement files (e.g., `REQ-001.md`).
-  - `docs/stakeholder-needs/`: Stakeholder needs mapping.
-  - `docs/research/technical-research.md`: **CRITICAL** - Contains implementation strategies for LLM tool calling and shell integration. Read this before implementing backend features.
+- `main.go`, `app.go`: Wails entrypoint and bound Go methods. Regenerate `frontend/wailsjs` after changing exported APIs (`wails generate module` or during dev/build).
+- `frontend/`: React app. `src/App.tsx` holds chat UI/state; `wailsjs/` contains generated bindings; Vite config at `frontend/vite.config.ts`.
+- `wails.json`: Wails project configuration (frontend commands, output file name).
+- `docs/`: Requirements, stakeholder needs, and research. `docs/research/technical-research.md` is **critical** for LLM/tool/shell strategy; `docs/MIGRATION.md` records the Tauri → Wails switch.
+- `.github/workflows/ci.yml`: CI runs `go test ./...` and Playwright (Ubuntu/Windows matrix).
 
 ## Development Commands
 
-- **Start Development Server**: `yarn tauri dev`
-- **Frontend Only**: `yarn dev`
-- **Build**: `yarn tauri build`
+- Live dev: `wails dev` (runs Vite dev server automatically).
+- Build: `wails build`.
+- Frontend only: `npm -C frontend run dev|build|preview` (install deps first).
+- Tests: `go test ./...`; Playwright (after installing deps and browsers) via `npm -C frontend run build`, `npx playwright install [--with-deps]`, `npx playwright test`.
+- Regenerate bindings when Go APIs change: `wails generate module`.
 
-## Key Features & Context
+## Current Functionality
 
-- **Chat Interface**: Modeled after standard chat apps (REQ-001).
-- **LLM Integration**: Supports OpenAI-compatible APIs (Ollama, vLLM).
-- **Tool Calling**: The application is designed to allow LLMs to execute local tools/commands.
-- **Platform**: Windows and Linux support.
+- Chat UI with multiple sessions persisted to `localStorage` under `shellwerk:sessions`.
+- Messages include user entries and a placeholder assistant reply; Enter submits; Send button mirrors Enter; auto-scroll to newest message; create/select sessions.
+- Settings modal captures provider/endpoint/model (Ollama/vLLM/mock) but backend wiring is pending; “Chat-only mode pending” chip reflects that state.
+- Styling lives in `frontend/src/App.css` and `frontend/src/style.css`.
 
 ## Guidelines
 
-1.  **Check Documentation**: Before implementing a feature, check `docs/requirements/` for specific acceptance criteria.
-2.  **Consult Research**: For complex technical tasks (especially LLM or Shell related), refer to `docs/research/technical-research.md` for established patterns and decisions.
-3.  **Tauri v2**: Remember this project uses Tauri v2. Ensure any API calls or configuration changes are compatible with v2 (e.g., plugin system, permissions).
-    - **Permissions**: This project uses Tauri's Capability system (ACL). Check `src-tauri/capabilities/` when adding new native capabilities.
-4.  **React 19**: The frontend uses React 19. Use modern React patterns.
-5.  Check the acceptance criteria in the requirement files to ensure full compliance when implementing features.
-6.  Add the e2e tests for the features you implement, as specified in REQ-008.
+1. Check `docs/requirements/` for acceptance criteria and `docs/stakeholder-needs/` for mappings before implementing features.
+2. Follow `docs/research/technical-research.md` for LLM tool calling, shell execution, reasoning UI, and testing strategy.
+3. Respect Wails v2 patterns: bind Go methods in `main.go`, keep `frontend/wailsjs` in sync, avoid Tauri-specific APIs.
+4. Centralize shell/LLM validation in Go per research; surface provider capabilities cleanly to the React UI.
+5. Keep CI parity: ensure `go test ./...` and Playwright suites stay green on Ubuntu and Windows.
+6. Add Playwright E2E coverage for new features per `REQ-008`, using mocked providers unless intentionally running real ones.
