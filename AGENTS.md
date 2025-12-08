@@ -42,3 +42,4 @@
 4. Centralize shell/LLM validation in Go per research; surface provider capabilities cleanly to the React UI.
 5. Keep CI parity: ensure `go test ./...` and Playwright suites stay green on Ubuntu and Windows.
 6. Add Playwright E2E coverage for new features per `REQ-008`, using mocked providers unless intentionally running real ones.
+7. Update the checkboxes in `docs/requirements/` as features are completed AND tested.

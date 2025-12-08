@@ -148,6 +148,22 @@
   font-size: 0.9rem;
 }
 
+.chip-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chip-ghost {
+  background: #112032;
+  color: #e6edf5;
+}
+
+.chip-warn {
+  background: #ffb347;
+  color: #0c151c;
+}
+
 .chat-feed {
   flex: 1;
   overflow-y: auto;
@@ -236,8 +252,8 @@
   resize: none;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: #ffffff;
+  background: #0f1620;
+  color: #f5f7fb;
   padding: 0.9rem 1rem;
   font-size: 1rem;
   line-height: 1.5;
@@ -298,8 +314,8 @@
 .modal select {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: #ffffff;
+  background: #0f1620;
+  color: #f5f7fb;
   padding: 0.75rem 0.9rem;
 }
 

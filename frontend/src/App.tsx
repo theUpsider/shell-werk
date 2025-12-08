@@ -1,5 +1,6 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Chat } from "../wailsjs/go/main/App";
 import "./App.css";
 
 type Role = "user" | "assistant" | "tool";
@@ -25,7 +26,21 @@ interface SettingsState {
   model: string;
 }
 
+interface ChatRequestPayload {
+  sessionId: string;
+  provider: string;
+  endpoint: string;
+  model: string;
+  message: string;
+}
+
+interface ChatResponsePayload {
+  message: { role: string; content: string };
+  latencyMs: number;
+}
+
 const STORAGE_KEY = "shellwerk:sessions";
+const SETTINGS_KEY = "shellwerk:settings";
 
 const createId = () =>
   crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -39,6 +54,24 @@ const createEmptySession = (): ChatSession => {
     updatedAt: timestamp,
     messages: [],
   };
+};
+
+const applyAssistantContent = (
+  sessionId: string,
+  placeholderId: string,
+  content: string,
+  updateSession: (
+    sessionId: string,
+    updater: (session: ChatSession) => ChatSession
+  ) => void
+) => {
+  updateSession(sessionId, (session) => ({
+    ...session,
+    messages: session.messages.map((msg) =>
+      msg.id === placeholderId ? { ...msg, content } : msg
+    ),
+    updatedAt: new Date().toISOString(),
+  }));
 };
 
 function App() {
@@ -62,11 +95,24 @@ function App() {
   );
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [settings, setSettings] = useState<SettingsState>({
-    provider: "ollama",
-    endpoint: "http://localhost:11434",
-    model: "qwen-3",
+  const [settings, setSettings] = useState<SettingsState>(() => {
+    const cached = localStorage.getItem(SETTINGS_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as SettingsState;
+        if (parsed?.provider && parsed?.endpoint && parsed?.model) return parsed;
+      } catch {
+        // ignore broken cache
+      }
+    }
+    return {
+      provider: "mock",
+      endpoint: "http://localhost:11434",
+      model: "qwen-3",
+    };
   });
+  const [isSending, setIsSending] = useState(false);
+  const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -78,6 +124,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
+
+  useEffect(() => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }, [settings]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -109,7 +159,7 @@ function App() {
 
   const handleSend = () => {
     const text = draft.trim();
-    if (!text || !activeSession) return;
+    if (!text || !activeSession || isSending) return;
 
     const userMessage: ChatMessage = {
       id: createId(),
@@ -141,6 +191,36 @@ function App() {
     });
 
     setDraft("");
+    setIsSending(true);
+    const payload: ChatRequestPayload = {
+      sessionId: activeSession.id,
+      provider: settings.provider,
+      endpoint: settings.endpoint,
+      model: settings.model,
+      message: text,
+    };
+
+    Chat(payload)
+      .then((response: ChatResponsePayload) => {
+        applyAssistantContent(
+          activeSession.id,
+          assistantPlaceholder.id,
+          response.message.content,
+          updateSession
+        );
+        setLastLatencyMs(response.latencyMs ?? null);
+      })
+      .catch((err: unknown) => {
+        const errorText = err instanceof Error ? err.message : "Unknown error";
+        applyAssistantContent(
+          activeSession.id,
+          assistantPlaceholder.id,
+          `Failed to reach provider: ${errorText}`,
+          updateSession
+        );
+        setLastLatencyMs(null);
+      })
+      .finally(() => setIsSending(false));
   };
 
   const handleEnterKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -208,7 +288,16 @@ function App() {
             <p className="label">Active chat</p>
             <h2>{activeSession?.title || "New Chat"}</h2>
           </div>
-          <div className="chip">Chat-only mode pending</div>
+          <div className="chip-row">
+            <div className="chip">Provider: {settings.provider}</div>
+            <div className={`chip ${isSending ? "chip-warn" : "chip-ghost"}`}>
+              {isSending
+                ? "Sending..."
+                : lastLatencyMs
+                ? `Last response: ${lastLatencyMs} ms`
+                : "Idle"}
+            </div>
+          </div>
         </div>
 
         <div className="chat-feed" ref={chatScrollRef}>
