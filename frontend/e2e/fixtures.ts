@@ -39,7 +39,7 @@ function shellHint(os: string): string {
 }
 
 function buildSystemPrompt(os: string): string {
-  return `You are a helpful assistant named shell-werk. Host OS: ${os}. ${shellHint(
+  return `You are shell-werk. Host OS: ${os}. ${shellHint(
     os
   )} When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary.`;
 }
