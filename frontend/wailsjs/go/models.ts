@@ -92,6 +92,8 @@ export namespace llm {
 	    history: ChatMessage[];
 	    tools: string[];
 	    chatOnly: boolean;
+	    webSearchApiKey: string;
+	    webSearchEndpoint: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChatRequest(source);
@@ -108,6 +110,8 @@ export namespace llm {
 	        this.history = this.convertValues(source["history"], ChatMessage);
 	        this.tools = source["tools"];
 	        this.chatOnly = source["chatOnly"];
+	        this.webSearchApiKey = source["webSearchApiKey"];
+	        this.webSearchEndpoint = source["webSearchEndpoint"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

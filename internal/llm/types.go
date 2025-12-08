@@ -37,6 +37,9 @@ type ChatRequest struct {
 	History   []ChatMessage          `json:"history"`
 	Tools     []string               `json:"tools"`
 	ChatOnly  bool                   `json:"chatOnly"`
+	// Tool-specific configuration (currently used for web search API access).
+	WebSearchAPIKey     string `json:"webSearchApiKey"`
+	WebSearchEndpoint   string `json:"webSearchEndpoint"`
 	ToolDefs  []tools.ToolDefinition `json:"-"`
 }
 

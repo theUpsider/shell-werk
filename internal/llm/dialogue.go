@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,25 +20,36 @@ import (
 	"shell-werk/internal/tools"
 )
 
+const braveSearchEndpointDefault = "https://api.search.brave.com/res/v1/web/search"
+
 type dialogueLoop struct {
-	provider string
-	endpoint string
-	apiKey   string
-	model    string
-	tools    []string
-	toolDefs []tools.ToolDefinition
-	client   *http.Client
+	provider          string
+	endpoint          string
+	apiKey            string
+	model             string
+	tools             []string
+	toolDefs          []tools.ToolDefinition
+	client            *http.Client
+	webSearchAPIKey   string
+	webSearchEndpoint string
 }
 
 func NewDialogueLoop(req ChatRequest) *dialogueLoop {
+	webSearchEndpoint := braveSearchEndpointDefault
+	if trimmed := strings.TrimSpace(req.WebSearchEndpoint); trimmed != "" {
+		webSearchEndpoint = trimmed
+	}
+
 	return &dialogueLoop{
-		provider: strings.ToLower(req.Provider),
-		endpoint: req.Endpoint,
-		apiKey:   req.APIKey,
-		model:    req.Model,
-		tools:    req.Tools,
-		toolDefs: req.ToolDefs,
-		client:   MakeClient(),
+		provider:          strings.ToLower(req.Provider),
+		endpoint:          req.Endpoint,
+		apiKey:            req.APIKey,
+		model:             req.Model,
+		tools:             req.Tools,
+		toolDefs:          req.ToolDefs,
+		client:            MakeClient(),
+		webSearchAPIKey:   strings.TrimSpace(req.WebSearchAPIKey),
+		webSearchEndpoint: webSearchEndpoint,
 	}
 }
 
@@ -215,6 +229,8 @@ func (l *dialogueLoop) executeTool(ctx context.Context, name string, args map[st
 		return l.browserTool(ctx, args)
 	case "shell":
 		return l.shellTool(ctx, args)
+	case "web_search":
+		return l.webSearchTool(ctx, args)
 	default:
 		return fmt.Sprintf("tool %s is not implemented", name), "error"
 	}
@@ -282,6 +298,110 @@ func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (stri
 		output = "(command completed with no output)"
 	}
 	return truncate(output, 2_048), "done"
+}
+
+func (l *dialogueLoop) webSearchTool(ctx context.Context, args map[string]any) (string, string) {
+	query, _ := args["query"].(string)
+	if strings.TrimSpace(query) == "" {
+		return "missing query", "error"
+	}
+
+	if l.webSearchAPIKey == "" {
+		return "Brave Search API key is not set. Add it in Settings before using web search.", "error"
+	}
+
+	count := 3
+	if val, ok := args["count"].(float64); ok {
+		if parsed := int(val); parsed >= 1 && parsed <= 20 {
+			count = parsed
+		}
+	}
+
+	searchURL := l.webSearchEndpoint
+	if strings.TrimSpace(searchURL) == "" {
+		searchURL = braveSearchEndpointDefault
+	}
+
+	parsedURL, err := url.Parse(searchURL)
+	if err != nil {
+		return fmt.Sprintf("invalid search endpoint: %v", err), "error"
+	}
+	q := parsedURL.Query()
+	q.Set("q", query)
+	q.Set("count", strconv.Itoa(count))
+	parsedURL.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return fmt.Sprintf("request build failed: %v", err), "error"
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Subscription-Token", l.webSearchAPIKey)
+
+	resp, err := l.client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("search request failed: %v", err), "error"
+	}
+	defer resp.Body.Close()
+
+	var reader io.Reader = resp.Body
+	var gz *gzip.Reader
+	if strings.Contains(resp.Header.Get("Content-Encoding"), "gzip") {
+		gz, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Sprintf("failed to decompress response: %v", err), "error"
+		}
+		defer gz.Close()
+		reader = gz
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(io.LimitReader(reader, 2_048))
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			detail = resp.Status
+		}
+		return fmt.Sprintf("Brave Search returned %s: %s", resp.Status, truncate(detail, 512)), "error"
+	}
+
+	var decoded struct {
+		Web struct {
+			Results []struct {
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Description string `json:"description"`
+			} `json:"results"`
+		} `json:"web"`
+	}
+
+	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
+		return fmt.Sprintf("decode failed: %v", err), "error"
+	}
+
+	if len(decoded.Web.Results) == 0 {
+		return fmt.Sprintf("No results found for %q.", query), "done"
+	}
+
+	var builder strings.Builder
+	for i, item := range decoded.Web.Results {
+		if i >= count {
+			break
+		}
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			title = "(untitled result)"
+		}
+		fmt.Fprintf(&builder, "%d. %s\n%s\n", i+1, title, strings.TrimSpace(item.URL))
+		if desc := strings.TrimSpace(item.Description); desc != "" {
+			builder.WriteString("Summary: ")
+			builder.WriteString(desc)
+			builder.WriteString("\n")
+		}
+		builder.WriteString("\n")
+	}
+
+	return truncate(builder.String(), 2_048), "done"
 }
 
 func (l *dialogueLoop) completionsURL() string {

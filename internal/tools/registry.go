@@ -154,6 +154,34 @@ func DefaultTools() []ToolMetadata {
 			},
 		},
 		{
+			ID:          "web_search",
+			Name:        "Web Search",
+			Description: "Search the web via Brave Search API.",
+			UIVisible:   true,
+			Enabled:     true,
+			Definition: ToolDefinition{
+				Type: "function",
+				Function: ToolFunctionDef{
+					Name:        "web_search",
+					Description: "Search the web using Brave Search and return concise results.",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{
+								"type":        "string",
+								"description": "Search query text to send to Brave Search",
+							},
+							"count": map[string]any{
+								"type":        "number",
+								"description": "Optional number of results (1-20, default 3)",
+							},
+						},
+						"required": []string{"query"},
+					},
+				},
+			},
+		},
+		{
 			ID:          "request_fullfilled",
 			Name:        "Request Fulfilled",
 			Description: "Signal completion.",

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -50,5 +50,33 @@ describe("settings modal", () => {
     expect(
       await screen.findByRole("option", { name: "llama3" })
     ).toBeInTheDocument();
+  });
+
+  it("adds, activates, and deletes model configs", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /settings/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /model settings/i });
+
+    expect(within(dialog).getAllByRole("radio", { name: /active/i })).toHaveLength(1);
+
+    await user.click(within(dialog).getByRole("button", { name: /add configuration/i }));
+
+    const radios = within(dialog).getAllByRole("radio", { name: /active/i });
+    expect(radios).toHaveLength(2);
+
+    await user.click(radios[1]);
+
+    const nameInputs = within(dialog).getAllByLabelText(/name/i);
+    await user.clear(nameInputs[1]);
+    await user.type(nameInputs[1], "Alt config");
+
+    const deleteButtons = within(dialog).getAllByRole("button", { name: /delete/i });
+    await user.click(deleteButtons[0]);
+
+    expect(within(dialog).getAllByRole("radio", { name: /active/i })).toHaveLength(1);
+    expect(nameInputs[1]).toHaveValue("Alt config");
   });
 });

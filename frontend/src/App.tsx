@@ -9,7 +9,13 @@ import {
   RunShellCommand,
 } from "../wailsjs/go/main/App";
 import { llm } from "../wailsjs/go/models";
-import { loadSettings, persistSettings, type SettingsState } from "./settings";
+import {
+  createModelConfig,
+  loadSettings,
+  persistSettings,
+  type ModelConfig,
+  type SettingsState,
+} from "./settings";
 import { ToolTraceMessage } from "./ToolTraceMessage";
 import "./App.css";
 import "./tool-calls.css";
@@ -169,9 +175,9 @@ function App() {
   );
   const [isSending, setIsSending] = useState(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  const [modelError, setModelError] = useState<string | null>(null);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsByConfig, setModelsByConfig] = useState<Record<string, string[]>>({});
+  const [modelErrors, setModelErrors] = useState<Record<string, string | null>>({});
+  const [isLoadingModels, setIsLoadingModels] = useState<Record<string, boolean>>({});
   const [toolError, setToolError] = useState<string | null>(null);
   const [isToolMenuOpen, setIsToolMenuOpen] = useState(false);
   const [thinking, setThinking] = useState<{
@@ -197,6 +203,32 @@ function App() {
     () => new Set(settings.hiddenToolsDisabled ?? []),
     [settings.hiddenToolsDisabled]
   );
+
+  const activeConfig = useMemo(() => {
+    if (!settings.configs?.length) return null;
+    return (
+      settings.configs.find((config) => config.id === settings.activeConfigId) ??
+      settings.configs[0]
+    );
+  }, [settings.activeConfigId, settings.configs]);
+
+  useEffect(() => {
+    if (settings.configs.length === 0) {
+      setSettings((prev) => {
+        if (prev.configs.length) return prev;
+        const fallback = createModelConfig();
+        return { ...prev, configs: [fallback], activeConfigId: fallback.id };
+      });
+      return;
+    }
+
+    if (!activeConfig) {
+      setSettings((prev) => ({
+        ...prev,
+        activeConfigId: prev.configs[0]?.id ?? prev.activeConfigId,
+      }));
+    }
+  }, [activeConfig, settings.configs]);
 
   const pendingDeletionSession = pendingDeletionId
     ? sessions.find((session) => session.id === pendingDeletionId) ?? null
@@ -261,11 +293,6 @@ function App() {
   }, [settings]);
 
   useEffect(() => {
-    setModels([]);
-    setModelError(null);
-  }, [settings.provider, settings.endpoint, settings.apiKey]);
-
-  useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
@@ -297,6 +324,10 @@ function App() {
   }, [thinking]);
 
   useEffect(() => {
+    const runtimeAvailable =
+      typeof globalThis !== "undefined" && (globalThis as { runtime?: unknown }).runtime;
+    if (!runtimeAvailable) return;
+
     const disposers = [
       EventsOn(THINKING_START_EVENT, (payload: ThinkingEventPayload) => {
         if (!payload?.sessionId) return;
@@ -415,6 +446,10 @@ function App() {
   const handleSend = () => {
     const text = draft.trim();
     if (!text || !activeSession || isSending) return;
+    if (!activeConfig) {
+      alert("Add a model configuration before sending a message.");
+      return;
+    }
     const sessionId = activeSession.id;
 
     const selectedTools = settings.chatOnly
@@ -471,10 +506,10 @@ function App() {
     setThinking({ sessionId, startedAt: Date.now() });
     const payload = llm.ChatRequest.createFrom({
       sessionId: activeSession.id,
-      provider: settings.provider,
-      endpoint: settings.endpoint,
-      apiKey: settings.apiKey,
-      model: settings.model,
+      provider: activeConfig.provider,
+      endpoint: activeConfig.endpoint,
+      apiKey: activeConfig.apiKey,
+      model: activeConfig.model,
       message: text,
       history,
       tools: selectedTools,
@@ -617,8 +652,90 @@ function App() {
     setShowSettings(false);
   };
 
-  const handleSettingsChange = (key: keyof SettingsState, value: string) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
+  const handleSelectConfig = (configId: string) => {
+    setSettings((prev) => ({ ...prev, activeConfigId: configId }));
+  };
+
+  const handleConfigChange = (
+    configId: string,
+    key: keyof ModelConfig,
+    value: string
+  ) => {
+    setSettings((prev) => {
+      const nextConfigs = prev.configs.map((config) =>
+        config.id === configId ? { ...config, [key]: value } : config
+      );
+      return { ...prev, configs: nextConfigs };
+    });
+
+    if (key === "provider" || key === "endpoint" || key === "apiKey") {
+      setModelsByConfig((prev) => {
+        const next = { ...prev };
+        delete next[configId];
+        return next;
+      });
+      setModelErrors((prev) => {
+        const next = { ...prev };
+        delete next[configId];
+        return next;
+      });
+    }
+  };
+
+  const handleAddConfig = () => {
+    setSettings((prev) => {
+      const template =
+        prev.configs[prev.configs.length - 1] ??
+        prev.configs.find((cfg) => cfg.id === prev.activeConfigId) ??
+        createModelConfig();
+
+      const next = createModelConfig({
+        provider: template.provider,
+        endpoint: template.endpoint,
+        apiKey: template.apiKey,
+        model: template.model,
+        name: `Config ${prev.configs.length + 1}`,
+      });
+
+      return {
+        ...prev,
+        configs: [...prev.configs, next],
+        activeConfigId: next.id,
+      };
+    });
+  };
+
+  const handleDeleteConfig = (configId: string) => {
+    setSettings((prev) => {
+      if (prev.configs.length <= 1) return prev;
+      const filtered = prev.configs.filter((config) => config.id !== configId);
+      const nextActiveId =
+        prev.activeConfigId === configId
+          ? filtered[0]?.id ?? prev.activeConfigId
+          : prev.activeConfigId;
+
+      return {
+        ...prev,
+        configs: filtered,
+        activeConfigId: nextActiveId,
+      };
+    });
+
+    setModelsByConfig((prev) => {
+      const next = { ...prev };
+      delete next[configId];
+      return next;
+    });
+    setModelErrors((prev) => {
+      const next = { ...prev };
+      delete next[configId];
+      return next;
+    });
+    setIsLoadingModels((prev) => {
+      const next = { ...prev };
+      delete next[configId];
+      return next;
+    });
   };
 
   const handleToggleChatOnly = (checked: boolean) => {
@@ -654,30 +771,40 @@ function App() {
     });
   };
 
-  const handleLoadModels = () => {
-    setIsLoadingModels(true);
-    setModelError(null);
+  const handleLoadModels = (configId: string) => {
+    const config = settings.configs.find((item) => item.id === configId);
+    if (!config) return;
+
+    setIsLoadingModels((prev) => ({ ...prev, [configId]: true }));
+    setModelErrors((prev) => ({ ...prev, [configId]: null }));
+
     Models({
-      provider: settings.provider,
-      endpoint: settings.endpoint,
-      apiKey: settings.apiKey,
+      provider: config.provider,
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
     })
       .then((res) => {
         const next = res?.models ?? [];
-        setModels(next);
+        setModelsByConfig((prev) => ({ ...prev, [configId]: next }));
         setSettings((prev) => {
-          if (next.length > 0 && (!prev.model || !next.includes(prev.model))) {
-            return { ...prev, model: next[0] };
-          }
-          return prev;
+          const configs = prev.configs.map((item) => {
+            if (item.id !== configId) return item;
+            if (next.length > 0 && (!item.model || !next.includes(item.model))) {
+              return { ...item, model: next[0] };
+            }
+            return item;
+          });
+          return { ...prev, configs };
         });
       })
       .catch((err: unknown) => {
         const message =
           err instanceof Error ? err.message : "Failed to load models";
-        setModelError(message);
+        setModelErrors((prev) => ({ ...prev, [configId]: message }));
       })
-      .finally(() => setIsLoadingModels(false));
+      .finally(() =>
+        setIsLoadingModels((prev) => ({ ...prev, [configId]: false }))
+      );
   };
 
   return (
@@ -736,7 +863,11 @@ function App() {
             <h2>{activeSession?.title || "New Chat"}</h2>
           </div>
           <div className="chip-row">
-            <div className="chip">Provider: {settings.provider}</div>
+            <div className="chip">
+              Config: {activeConfig?.name || "No config"} ·
+              {" "}
+              {activeConfig?.provider || "unset"}
+            </div>
             <div className={`chip ${isSending ? "chip-warn" : "chip-ghost"}`}>
               {isSending
                 ? "Sending..."
@@ -981,122 +1112,229 @@ function App() {
               </button>
             </div>
             <form className="modal-body" onSubmit={handleSettingsSubmit}>
-              <label>
-                <span className="label-text">Provider</span>
-                <select
-                  value={settings.provider}
-                  onChange={(e) =>
-                    handleSettingsChange("provider", e.target.value)
-                  }
-                >
-                  <option value="ollama">Ollama</option>
-                  <option value="vllm">vLLM</option>
-                  <option value="mock">Mock</option>
-                </select>
-              </label>
-              <label>
-                <span className="label-text">Endpoint</span>
-                <input
-                  type="text"
-                  value={settings.endpoint}
-                  onChange={(e) =>
-                    handleSettingsChange("endpoint", e.target.value)
-                  }
-                  placeholder="http://localhost:11434"
-                />
-              </label>
-              <label>
-                <span className="label-text">API key (Bearer)</span>
-                <input
-                  type="password"
-                  value={settings.apiKey}
-                  onChange={(e) =>
-                    handleSettingsChange("apiKey", e.target.value)
-                  }
-                  placeholder="sk-..."
-                  autoComplete="off"
-                />
-              </label>
-              <label>
-                <span className="label-text">Model</span>
-                {models.length ? (
-                  <select
-                    value={settings.model}
-                    onChange={(e) =>
-                      handleSettingsChange("model", e.target.value)
-                    }
+              <div className="modal-section">
+                <div className="config-header-row">
+                  <div>
+                    <p className="section-title">Model configurations</p>
+                    <p className="section-hint">
+                      Create cards for each provider + endpoint + model combo and pick one
+                      as the active chat target.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={handleAddConfig}
                   >
-                    {models.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={settings.model}
-                    onChange={(e) =>
-                      handleSettingsChange("model", e.target.value)
-                    }
-                    placeholder="qwen-3"
-                  />
-                )}
-              </label>
-              <div className="inline-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={handleLoadModels}
-                  disabled={isLoadingModels}
+                    Add configuration
+                  </button>
+                </div>
+                <div
+                  className="config-card-list"
+                  role="list"
+                  aria-label="Model configurations"
                 >
-                  {isLoadingModels ? "Loading models..." : "Load models"}
-                </button>
-                {modelError && <span className="error-text">{modelError}</span>}
-                {!modelError && models.length > 0 && (
-                  <span className="muted">
-                    {models.length} models available
-                  </span>
-                )}
-              </div>
-              <p className="muted">
-                Full provider wiring coming in later milestones.
-              </p>
-              <label className="inline-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.chatOnly}
-                  onChange={(e) => handleToggleChatOnly(e.target.checked)}
-                />
-                <span>Chat Only mode (disable tools)</span>
-              </label>
-              {toolCatalog.some((tool) => !tool.uiVisible) && (
-                <div className="hidden-tools" aria-label="Hidden tools">
-                  <p className="label-text">
-                    Hidden tools (global enable/disable)
-                  </p>
-                  <div className="hidden-tool-grid">
-                    {toolCatalog
-                      .filter((tool) => !tool.uiVisible)
-                      .map((tool) => {
-                        const enabled = !hiddenDisabled.has(tool.id);
-                        return (
-                          <label key={tool.id} className="inline-toggle">
+                  {settings.configs.map((config, index) => {
+                    const models = modelsByConfig[config.id] ?? [];
+                    const modelError = modelErrors[config.id];
+                    const loading = isLoadingModels[config.id] ?? false;
+                    const isActive = config.id === settings.activeConfigId;
+                    return (
+                      <div
+                        key={config.id}
+                        className={`config-card ${isActive ? "active" : ""}`}
+                        role="listitem"
+                      >
+                        <div className="config-card-top">
+                          <label>
+                            <span className="label-text">Name</span>
                             <input
-                              type="checkbox"
-                              checked={enabled}
-                              onChange={() => handleToggleHiddenTool(tool.id)}
+                              type="text"
+                              value={config.name}
+                              placeholder={`Config ${index + 1}`}
+                              onChange={(e) =>
+                                handleConfigChange(
+                                  config.id,
+                                  "name",
+                                  e.target.value
+                                )
+                              }
                             />
-                            <span>
-                              {tool.name} (hidden tool)
-                              <span className="muted">
-                                {" "}
-                                — {tool.description}
-                              </span>
-                            </span>
                           </label>
-                        );
-                      })}
+                          <div className="config-card-actions">
+                            <label className="inline-toggle">
+                              <input
+                                type="radio"
+                                name="active-config"
+                                checked={isActive}
+                                onChange={() => handleSelectConfig(config.id)}
+                              />
+                              <span>Active</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => handleDeleteConfig(config.id)}
+                              disabled={settings.configs.length <= 1}
+                              aria-label={`Delete ${config.name || `config ${
+                                index + 1
+                              }`}`}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        <div className="config-grid">
+                          <label>
+                            <span className="label-text">Provider</span>
+                            <select
+                              value={config.provider}
+                              onChange={(e) =>
+                                handleConfigChange(
+                                  config.id,
+                                  "provider",
+                                  e.target.value
+                                )
+                              }
+                            >
+                              <option value="ollama">Ollama</option>
+                              <option value="vllm">vLLM</option>
+                              <option value="mock">Mock</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span className="label-text">Endpoint</span>
+                            <input
+                              type="text"
+                              value={config.endpoint}
+                              onChange={(e) =>
+                                handleConfigChange(
+                                  config.id,
+                                  "endpoint",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="http://localhost:11434"
+                            />
+                          </label>
+                          <label>
+                            <span className="label-text">API key (Bearer)</span>
+                            <input
+                              type="password"
+                              value={config.apiKey}
+                              onChange={(e) =>
+                                handleConfigChange(
+                                  config.id,
+                                  "apiKey",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="sk-..."
+                              autoComplete="off"
+                            />
+                          </label>
+                          <label>
+                            <span className="label-text">Model</span>
+                            {models.length ? (
+                              <select
+                                value={config.model}
+                                onChange={(e) =>
+                                  handleConfigChange(
+                                    config.id,
+                                    "model",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                {models.map((model) => (
+                                  <option key={model} value={model}>
+                                    {model}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                value={config.model}
+                                onChange={(e) =>
+                                  handleConfigChange(
+                                    config.id,
+                                    "model",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="qwen-3"
+                              />
+                            )}
+                          </label>
+                        </div>
+                        <div className="inline-actions config-card-footer">
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => handleLoadModels(config.id)}
+                            disabled={loading}
+                          >
+                            {loading ? "Loading models..." : "Load models"}
+                          </button>
+                          {modelError && (
+                            <span className="error-text">{modelError}</span>
+                          )}
+                          {!modelError && models.length > 0 && (
+                            <span className="muted">
+                              {models.length} models available
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="modal-section">
+                <p className="section-title">Conversation defaults</p>
+                <p className="section-hint">
+                  Apply global chat behaviors before sending messages.
+                </p>
+                <label className="inline-toggle">
+                  <input
+                    type="checkbox"
+                    checked={settings.chatOnly}
+                    onChange={(e) => handleToggleChatOnly(e.target.checked)}
+                  />
+                  <span>Chat Only mode (disable tools)</span>
+                </label>
+              </div>
+              {toolCatalog.some((tool) => !tool.uiVisible) && (
+                <div className="modal-section">
+                  <p className="section-title">Hidden tools</p>
+                  <p className="section-hint">
+                    Toggle global availability for tools that are not shown in the chat UI.
+                  </p>
+                  <div className="hidden-tools" aria-label="Hidden tools">
+                    <div className="hidden-tool-grid">
+                      {toolCatalog
+                        .filter((tool) => !tool.uiVisible)
+                        .map((tool) => {
+                          const enabled = !hiddenDisabled.has(tool.id);
+                          return (
+                            <label key={tool.id} className="inline-toggle">
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={() => handleToggleHiddenTool(tool.id)}
+                              />
+                              <span>
+                                {tool.name} (hidden tool)
+                                <span className="muted">
+                                  {" "}
+                                  — {tool.description}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </div>
                   </div>
                 </div>
               )}

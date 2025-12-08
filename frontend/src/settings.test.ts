@@ -26,15 +26,40 @@ describe("loadSettings", () => {
     const storage = createMemoryStorage();
     const settings = loadSettings(storage);
 
-    expect(settings).toStrictEqual(defaultSettings);
+    expect(settings.configs).toHaveLength(1);
+    expect(settings.activeConfigId).toEqual(settings.configs[0].id);
+    expect(settings).toMatchObject({
+      chatOnly: true,
+      hiddenToolsDisabled: [],
+    });
+    expect(settings.configs[0]).toMatchObject({
+      provider: defaultSettings.configs[0].provider,
+      endpoint: defaultSettings.configs[0].endpoint,
+      model: defaultSettings.configs[0].model,
+    });
   });
 
   it("returns cached settings when valid", () => {
     const cached: SettingsState = {
-      provider: "vllm",
-      endpoint: "https://vllm.internal",
-      model: "mistral:7b",
-      apiKey: "abc123",
+      configs: [
+        {
+          id: "config-one",
+          name: "Primary vLLM",
+          provider: "vllm",
+          endpoint: "https://vllm.internal",
+          model: "mistral:7b",
+          apiKey: "abc123",
+        },
+        {
+          id: "config-two",
+          name: "Ollama",
+          provider: "ollama",
+          endpoint: "http://localhost:11434",
+          model: "llama3",
+          apiKey: "",
+        },
+      ],
+      activeConfigId: "config-two",
       chatOnly: false,
       hiddenToolsDisabled: ["shell"],
     };
@@ -47,13 +72,45 @@ describe("loadSettings", () => {
     expect(settings).toStrictEqual(cached);
   });
 
+  it("upgrades legacy single-config shape", () => {
+    const storage = createMemoryStorage({
+      [SETTINGS_KEY]: JSON.stringify({
+        provider: "vllm",
+        endpoint: "https://vllm.internal",
+        model: "mistral:7b",
+        apiKey: "secret",
+        chatOnly: false,
+        hiddenToolsDisabled: ["shell"],
+      }),
+    });
+
+    const settings = loadSettings(storage);
+
+    expect(settings.configs).toHaveLength(1);
+    expect(settings.activeConfigId).toEqual(settings.configs[0].id);
+    expect(settings.chatOnly).toBe(false);
+    expect(settings.configs[0]).toMatchObject({
+      provider: "vllm",
+      endpoint: "https://vllm.internal",
+      model: "mistral:7b",
+      apiKey: "secret",
+    });
+  });
+
   it("falls back to defaults when cache is invalid", () => {
     const storage = createMemoryStorage({
       [SETTINGS_KEY]: JSON.stringify({
-        provider: "",
-        endpoint: "",
-        model: "",
-        apiKey: 1,
+        configs: [
+          {
+            id: "bad",
+            name: "",
+            provider: "",
+            endpoint: "",
+            model: "",
+            apiKey: 1,
+          },
+        ],
+        activeConfigId: "bad",
       }),
     });
 
@@ -67,10 +124,17 @@ describe("persistSettings", () => {
   it("writes settings to storage with the configured key", () => {
     const storage = createMemoryStorage();
     const next: SettingsState = {
-      provider: "ollama",
-      endpoint: "http://localhost:11434",
-      model: "llama3",
-      apiKey: "secret",
+      configs: [
+        {
+          id: "config-one",
+          name: "Local ollama",
+          provider: "ollama",
+          endpoint: "http://localhost:11434",
+          model: "llama3",
+          apiKey: "secret",
+        },
+      ],
+      activeConfigId: "config-one",
       chatOnly: true,
       hiddenToolsDisabled: [],
     };
