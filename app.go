@@ -32,8 +32,9 @@ type ChatRequest struct {
 
 // ChatResponse returns the assistant message content (stubbed for now).
 type ChatResponse struct {
-	Message   ChatMessage `json:"message"`
-	LatencyMs int64       `json:"latencyMs"`
+	Message   ChatMessage     `json:"message"`
+	LatencyMs int64           `json:"latencyMs"`
+	Trace     []DialogueTrace `json:"trace"`
 }
 
 // SetToolEnabledRequest toggles a tool's enabled state.
@@ -73,16 +74,34 @@ func (a *App) Greet(name string) string {
 // Chat proxies to the configured provider (mock for now) and returns the response.
 func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	start := time.Now()
-	provider := ProviderFor(req.Provider)
-	msg, err := provider.Chat(a.ctx, req)
-	if err != nil {
-		return ChatResponse{}, err
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
+	if req.ChatOnly || len(req.Tools) == 0 {
+		provider := ProviderFor(req.Provider)
+		msg, err := provider.Chat(ctx, req)
+		if err != nil {
+			return ChatResponse{}, err
+		}
+		return ChatResponse{
+			Message:   msg,
+			LatencyMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	loop := newDialogueLoop(req)
+	msg, trace, err := loop.run(ctx, req.Message)
 	return ChatResponse{
 		Message:   msg,
 		LatencyMs: time.Since(start).Milliseconds(),
-	}, nil
+		Trace:     trace,
+	}, err
 }
 
 // Models returns the provider's available models for the configured endpoint.

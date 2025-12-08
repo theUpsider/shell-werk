@@ -42,6 +42,7 @@ export namespace main {
   export class ChatResponse {
     message: ChatMessage;
     latencyMs: number;
+    trace: DialogueTrace[];
 
     static createFrom(source: any = {}) {
       return new ChatResponse(source);
@@ -51,6 +52,7 @@ export namespace main {
       if ("string" === typeof source) source = JSON.parse(source);
       this.message = this.convertValues(source["message"], ChatMessage);
       this.latencyMs = source["latencyMs"];
+      this.trace = this.convertValues(source["trace"], DialogueTrace);
     }
 
     convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -131,6 +133,30 @@ export namespace main {
       this.description = source["description"];
       this.uiVisible = source["uiVisible"];
       this.enabled = source["enabled"];
+    }
+  }
+  export class DialogueTrace {
+    id: string;
+    role: string;
+    kind: string;
+    title: string;
+    content: string;
+    status: string;
+    createdAt: string;
+
+    static createFrom(source: any = {}) {
+      return new DialogueTrace(source);
+    }
+
+    constructor(source: any = {}) {
+      if ("string" === typeof source) source = JSON.parse(source);
+      this.id = source["id"];
+      this.role = source["role"];
+      this.kind = source["kind"];
+      this.title = source["title"];
+      this.content = source["content"];
+      this.status = source["status"];
+      this.createdAt = source["createdAt"];
     }
   }
 }

@@ -14,11 +14,20 @@ export interface SettingsStorage {
 
 export const SETTINGS_KEY = "shellwerk:settings";
 
+const envVLLMEndpoint =
+  (import.meta as { env?: Record<string, string> }).env?.VITE_VLLM_URL ||
+  (import.meta as { env?: Record<string, string> }).env?.VITE_VLLM_ENDPOINT ||
+  "http://localhost:11434";
+
+const envVLLMApiKey =
+  (import.meta as { env?: Record<string, string> }).env?.VITE_VLLM_API_KEY ||
+  "";
+
 export const defaultSettings: SettingsState = {
   provider: "mock",
-  endpoint: "http://localhost:11434",
+  endpoint: envVLLMEndpoint,
   model: "qwen-3",
-  apiKey: "",
+  apiKey: envVLLMApiKey,
   chatOnly: true,
   hiddenToolsDisabled: [],
 };

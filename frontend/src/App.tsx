@@ -36,6 +36,17 @@ interface ChatRequestPayload {
 interface ChatResponsePayload {
   message: { role: string; content: string };
   latencyMs: number;
+  trace?: DialogueTrace[];
+}
+
+interface DialogueTrace {
+  id: string;
+  role: string;
+  kind: string;
+  title?: string;
+  content: string;
+  status?: string;
+  createdAt?: string;
 }
 
 interface ToolMetadata {
@@ -263,12 +274,39 @@ function App() {
 
     Chat(payload)
       .then((response: ChatResponsePayload) => {
-        applyAssistantContent(
-          activeSession.id,
-          assistantPlaceholder.id,
-          response.message.content,
-          updateSession
-        );
+        const traceMessages = (response.trace ?? []).map((step) => {
+          const createdAt = step.createdAt ?? new Date().toISOString();
+          const role: Role = step.role === "tool" ? "tool" : "assistant";
+          const statusPrefix = step.status ? `[${step.status}] ` : "";
+          const titlePrefix = step.title ? `${step.title}: ` : "";
+          const kindPrefix = step.kind ? `${step.kind} · ` : "";
+          return {
+            id: createId(),
+            role,
+            content: `${kindPrefix}${statusPrefix}${titlePrefix}${step.content}`.trim(),
+            createdAt,
+          } satisfies ChatMessage;
+        });
+
+        updateSession(activeSession.id, (session) => {
+          const now = new Date().toISOString();
+          const withoutPlaceholder = session.messages.filter(
+            (msg) => msg.id !== assistantPlaceholder.id
+          );
+          const finalMessage: ChatMessage = {
+            id: assistantPlaceholder.id,
+            role: (response.message.role as Role) ?? "assistant",
+            content: response.message.content,
+            createdAt: now,
+          };
+
+          return {
+            ...session,
+            messages: [...withoutPlaceholder, ...traceMessages, finalMessage],
+            updatedAt: now,
+          };
+        });
+
         setLastLatencyMs(response.latencyMs ?? null);
       })
       .catch((err: unknown) => {
