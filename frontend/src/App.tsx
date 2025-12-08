@@ -250,7 +250,8 @@ function App() {
         }
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : "Failed to load models";
+        const message =
+          err instanceof Error ? err.message : "Failed to load models";
         setModelError(message);
       })
       .finally(() => setIsLoadingModels(false));
@@ -427,7 +428,9 @@ function App() {
                 </button>
                 {modelError && <span className="error-text">{modelError}</span>}
                 {!modelError && models.length > 0 && (
-                  <span className="muted">{models.length} models available</span>
+                  <span className="muted">
+                    {models.length} models available
+                  </span>
                 )}
               </div>
               <p className="muted">

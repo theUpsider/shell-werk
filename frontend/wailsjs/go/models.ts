@@ -2,32 +2,6 @@ export namespace main {
 	
 	export class ChatMessage {
 	    role: string;
-	export class ModelsRequest {
-	    provider: string;
-	    endpoint: string;
-
-	    static createFrom(source: any = {}) {
-	        return new ModelsRequest(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.provider = source["provider"];
-	        this.endpoint = source["endpoint"];
-	    }
-	}
-	export class ModelsResponse {
-	    models: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new ModelsResponse(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.models = source["models"];
-	    }
-	}
 	    content: string;
 	
 	    static createFrom(source: any = {}) {
@@ -91,6 +65,32 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class ModelsRequest {
+	    provider: string;
+	    endpoint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelsRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.endpoint = source["endpoint"];
+	    }
+	}
+	export class ModelsResponse {
+	    models: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelsResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.models = source["models"];
+	    }
 	}
 
 }

@@ -38,6 +38,8 @@ describe("settings modal", () => {
 
     await user.click(screen.getByRole("button", { name: /load models/i }));
 
-    expect(await screen.findByRole("option", { name: "llama3" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("option", { name: "llama3" })
+    ).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
-import {defineConfig} from "vitest/config"
-import react from "@vitejs/plugin-react"
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
 
 const isTest = process.env.VITEST === "true";
 
@@ -8,6 +8,6 @@ export default defineConfig({
   plugins: [react({ fastRefresh: !isTest })],
   test: {
     environment: "jsdom",
-    setupFiles: "./vitest.setup.ts"
+    setupFiles: "./vitest.setup.ts",
   },
 });
