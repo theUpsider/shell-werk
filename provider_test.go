@@ -135,7 +135,9 @@ func TestOllamaProviderChatDefaultsAndError(t *testing.T) {
 
 func TestVLLMProviderChatSuccess(t *testing.T) {
 	var received chatPayload
+	var authHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -150,7 +152,7 @@ func TestVLLMProviderChatSuccess(t *testing.T) {
 	defer server.Close()
 
 	provider := VLLMProvider{client: server.Client()}
-	msg, err := provider.Chat(context.Background(), ChatRequest{Endpoint: server.URL, Model: "mistral", Message: "ping"})
+	msg, err := provider.Chat(context.Background(), ChatRequest{Endpoint: server.URL, Model: "mistral", Message: "ping", APIKey: "secret"})
 	if err != nil {
 		t.Fatalf("VLLMProvider.Chat returned error: %v", err)
 	}
@@ -163,6 +165,9 @@ func TestVLLMProviderChatSuccess(t *testing.T) {
 	}
 	if msg.Role != "assistant" || msg.Content != "pong" {
 		t.Fatalf("unexpected response message: %+v", msg)
+	}
+	if authHeader != "Bearer secret" {
+		t.Fatalf("expected Authorization header to be set, got %q", authHeader)
 	}
 }
 
@@ -228,7 +233,7 @@ func TestListModelsOllama(t *testing.T) {
 	}))
 	defer server.Close()
 
-	models, err := ListModels(context.Background(), "ollama", server.URL, server.Client())
+	models, err := ListModels(context.Background(), "ollama", server.URL, "", server.Client())
 	if err != nil {
 		t.Fatalf("ListModels returned error: %v", err)
 	}
@@ -241,22 +246,27 @@ func TestListModelsOllama(t *testing.T) {
 }
 
 func TestListModelsVLLM(t *testing.T) {
+	var authHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		authHeader = r.Header.Get("Authorization")
 		_ = json.NewEncoder(w).Encode(vllmModelsResponse{Data: []struct {
 			ID string `json:"id"`
 		}{{ID: "mixtral"}, {ID: ""}}})
 	}))
 	defer server.Close()
 
-	models, err := ListModels(context.Background(), "vllm", server.URL, server.Client())
+	models, err := ListModels(context.Background(), "vllm", server.URL, "secret", server.Client())
 	if err != nil {
 		t.Fatalf("ListModels returned error: %v", err)
 	}
 	if len(models) != 1 || models[0] != "mixtral" {
 		t.Fatalf("unexpected models: %+v", models)
+	}
+	if authHeader != "Bearer secret" {
+		t.Fatalf("expected Authorization header to be set, got %q", authHeader)
 	}
 }
 
@@ -266,12 +276,12 @@ func TestListModelsErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ListModels(context.Background(), "ollama", server.URL, server.Client())
+	_, err := ListModels(context.Background(), "ollama", server.URL, "", server.Client())
 	if err == nil || !strings.Contains(err.Error(), "ollama list models") {
 		t.Fatalf("expected ollama error, got %v", err)
 	}
 
-	if _, err := ListModels(context.Background(), "unknown", server.URL, server.Client()); err == nil {
+	if _, err := ListModels(context.Background(), "unknown", server.URL, "", server.Client()); err == nil {
 		t.Fatalf("expected error for unsupported provider")
 	}
 }

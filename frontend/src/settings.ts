@@ -2,6 +2,7 @@ export interface SettingsState {
   provider: string;
   endpoint: string;
   model: string;
+  apiKey: string;
 }
 
 export interface SettingsStorage {
@@ -15,6 +16,7 @@ export const defaultSettings: SettingsState = {
   provider: "mock",
   endpoint: "http://localhost:11434",
   model: "qwen-3",
+  apiKey: "",
 };
 
 const isValidSettings = (value: unknown): value is SettingsState => {
@@ -23,6 +25,7 @@ const isValidSettings = (value: unknown): value is SettingsState => {
   const provider = maybe.provider;
   const endpoint = maybe.endpoint;
   const model = maybe.model;
+  const apiKey = maybe.apiKey;
 
   return (
     typeof provider === "string" &&
@@ -30,7 +33,8 @@ const isValidSettings = (value: unknown): value is SettingsState => {
     typeof endpoint === "string" &&
     endpoint.trim() !== "" &&
     typeof model === "string" &&
-    model.trim() !== ""
+    model.trim() !== "" &&
+    (typeof apiKey === "string" || apiKey === undefined)
   );
 };
 
@@ -41,7 +45,7 @@ export function loadSettings(storage: SettingsStorage): SettingsState {
   try {
     const parsed = JSON.parse(cached);
     if (isValidSettings(parsed)) {
-      return parsed;
+      return { ...parsed, apiKey: parsed.apiKey ?? "" };
     }
   } catch {
     // ignore broken cache and fall back to defaults

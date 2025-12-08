@@ -22,6 +22,7 @@ type ChatRequest struct {
 	SessionID string `json:"sessionId"`
 	Provider  string `json:"provider"`
 	Endpoint  string `json:"endpoint"`
+	APIKey    string `json:"apiKey"`
 	Model     string `json:"model"`
 	Message   string `json:"message"`
 }
@@ -36,6 +37,7 @@ type ChatResponse struct {
 type ModelsRequest struct {
 	Provider string `json:"provider"`
 	Endpoint string `json:"endpoint"`
+	APIKey   string `json:"apiKey"`
 }
 
 // ModelsResponse wraps the provider model names.
@@ -76,7 +78,7 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 
 // Models returns the provider's available models for the configured endpoint.
 func (a *App) Models(req ModelsRequest) (ModelsResponse, error) {
-	models, err := ListModels(a.ctx, req.Provider, req.Endpoint, nil)
+	models, err := ListModels(a.ctx, req.Provider, req.Endpoint, req.APIKey, nil)
 	if err != nil {
 		return ModelsResponse{}, err
 	}

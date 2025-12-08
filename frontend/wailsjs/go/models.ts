@@ -18,6 +18,7 @@ export namespace main {
 	    sessionId: string;
 	    provider: string;
 	    endpoint: string;
+	    apiKey: string;
 	    model: string;
 	    message: string;
 	
@@ -30,6 +31,7 @@ export namespace main {
 	        this.sessionId = source["sessionId"];
 	        this.provider = source["provider"];
 	        this.endpoint = source["endpoint"];
+	        this.apiKey = source["apiKey"];
 	        this.model = source["model"];
 	        this.message = source["message"];
 	    }
@@ -69,6 +71,7 @@ export namespace main {
 	export class ModelsRequest {
 	    provider: string;
 	    endpoint: string;
+	    apiKey: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ModelsRequest(source);
@@ -78,6 +81,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.provider = source["provider"];
 	        this.endpoint = source["endpoint"];
+	        this.apiKey = source["apiKey"];
 	    }
 	}
 	export class ModelsResponse {

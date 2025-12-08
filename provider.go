@@ -158,6 +158,9 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 		return ChatMessage{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(req.APIKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -205,7 +208,7 @@ func ProviderFor(name string) ChatProvider {
 
 // ListModels returns available model identifiers for the given provider and endpoint.
 // The HTTP client can be injected for tests; makeClient is used when nil.
-func ListModels(ctx context.Context, provider, endpoint string, client *http.Client) ([]string, error) {
+func ListModels(ctx context.Context, provider, endpoint, apiKey string, client *http.Client) ([]string, error) {
 	if client == nil {
 		client = makeClient()
 	}
@@ -216,7 +219,7 @@ func ListModels(ctx context.Context, provider, endpoint string, client *http.Cli
 	case "ollama":
 		return listOllamaModels(ctx, base, client)
 	case "vllm":
-		return listVLLMModels(ctx, base, client)
+		return listVLLMModels(ctx, base, apiKey, client)
 	case "mock":
 		return []string{"mock"}, nil
 	default:
@@ -255,11 +258,15 @@ func listOllamaModels(ctx context.Context, base string, client *http.Client) ([]
 	return models, nil
 }
 
-func listVLLMModels(ctx context.Context, base string, client *http.Client) ([]string, error) {
+func listVLLMModels(ctx context.Context, base, apiKey string, client *http.Client) ([]string, error) {
 	url := base + "/v1/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	resp, err := client.Do(req)

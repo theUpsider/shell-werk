@@ -25,6 +25,7 @@ interface ChatRequestPayload {
   sessionId: string;
   provider: string;
   endpoint: string;
+  apiKey: string;
   model: string;
   message: string;
 }
@@ -116,7 +117,7 @@ function App() {
   useEffect(() => {
     setModels([]);
     setModelError(null);
-  }, [settings.provider, settings.endpoint]);
+  }, [settings.provider, settings.endpoint, settings.apiKey]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -185,6 +186,7 @@ function App() {
       sessionId: activeSession.id,
       provider: settings.provider,
       endpoint: settings.endpoint,
+      apiKey: settings.apiKey,
       model: settings.model,
       message: text,
     };
@@ -241,7 +243,11 @@ function App() {
   const handleLoadModels = () => {
     setIsLoadingModels(true);
     setModelError(null);
-    Models({ provider: settings.provider, endpoint: settings.endpoint })
+    Models({
+      provider: settings.provider,
+      endpoint: settings.endpoint,
+      apiKey: settings.apiKey,
+    })
       .then((res) => {
         const next = res?.models ?? [];
         setModels(next);
@@ -389,6 +395,18 @@ function App() {
                     handleSettingsChange("endpoint", e.target.value)
                   }
                   placeholder="http://localhost:11434"
+                />
+              </label>
+              <label>
+                <span className="label-text">API key (Bearer)</span>
+                <input
+                  type="password"
+                  value={settings.apiKey}
+                  onChange={(e) =>
+                    handleSettingsChange("apiKey", e.target.value)
+                  }
+                  placeholder="sk-..."
+                  autoComplete="off"
                 />
               </label>
               <label>

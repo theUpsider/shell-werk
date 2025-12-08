@@ -34,6 +34,7 @@ describe("loadSettings", () => {
       provider: "vllm",
       endpoint: "https://vllm.internal",
       model: "mistral:7b",
+      apiKey: "abc123",
     };
     const storage = createMemoryStorage({
       [SETTINGS_KEY]: JSON.stringify(cached),
@@ -46,7 +47,12 @@ describe("loadSettings", () => {
 
   it("falls back to defaults when cache is invalid", () => {
     const storage = createMemoryStorage({
-      [SETTINGS_KEY]: JSON.stringify({ provider: "", endpoint: "", model: "" }),
+      [SETTINGS_KEY]: JSON.stringify({
+        provider: "",
+        endpoint: "",
+        model: "",
+        apiKey: 1,
+      }),
     });
 
     const settings = loadSettings(storage);
@@ -62,6 +68,7 @@ describe("persistSettings", () => {
       provider: "ollama",
       endpoint: "http://localhost:11434",
       model: "llama3",
+      apiKey: "secret",
     };
 
     persistSettings(storage, next);
