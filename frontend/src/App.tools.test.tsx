@@ -74,8 +74,9 @@ describe("tool toggles", () => {
 
     expect(mockChat).toHaveBeenCalledWith(
       expect.objectContaining({
-        tools: expect.arrayContaining(["browser"]),
-        tools: expect.not.arrayContaining(["web_search"]),
+        tools:
+          expect.arrayContaining(["browser"]) &&
+          expect.not.arrayContaining(["web_search"]),
         chatOnly: false,
       })
     );

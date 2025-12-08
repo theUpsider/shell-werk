@@ -66,8 +66,8 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 		messages = append(messages, chatCompletionMessage{Role: msg.Role, Content: msg.Content})
 	}
 
-	// Allow up to six tool iterations per request to avoid runaway loops.
-	for iteration := 0; iteration < 6; iteration++ {
+	// Allow up to 12 tool iterations per request to avoid runaway loops.
+	for iteration := 0; iteration < 12; iteration++ {
 		choice, err := l.requestCompletion(ctx, messages, toolDefs)
 		if err != nil {
 			trace = append(trace, DialogueTrace{
@@ -163,7 +163,7 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 		Role:      "assistant",
 		Kind:      "timeout",
 		Status:    "timeout",
-		Content:   "Loop ended after 6 iterations without request_fullfilled.",
+		Content:   "Loop ended after 12 iterations without request_fullfilled.",
 		CreatedAt: time.Now(),
 	})
 
@@ -203,18 +203,31 @@ func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCom
 
 	resp, err := l.client.Do(req)
 	if err != nil {
-		return completionChoice{}, err
+		return completionChoice{}, fmt.Errorf("%s completion request failed: %w", strings.ToUpper(l.provider), err)
 	}
 	defer resp.Body.Close()
 	log.Printf("[%s] Received dialogue completion response", time.Now().Format(time.RFC3339))
 
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return completionChoice{}, fmt.Errorf("%s completion read failed: %w", strings.ToUpper(l.provider), err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		detail := strings.TrimSpace(string(rawBody))
+		if detail == "" {
+			detail = resp.Status
+		}
+		return completionChoice{}, fmt.Errorf("%s completion returned %s: %s", strings.ToUpper(l.provider), resp.Status, truncate(detail, 512))
+	}
+
 	var decoded completionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return completionChoice{}, err
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		return completionChoice{}, fmt.Errorf("%s completion decode failed: %w", strings.ToUpper(l.provider), err)
 	}
 
 	if decoded.Error.Message != "" {
-		return completionChoice{}, errors.New(decoded.Error.Message)
+		return completionChoice{}, fmt.Errorf("%s completion error: %s", strings.ToUpper(l.provider), decoded.Error.Message)
 	}
 	if len(decoded.Choices) == 0 {
 		return completionChoice{}, errors.New("no choices returned from provider")

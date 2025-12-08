@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"shell-werk/internal/llm"
@@ -63,7 +64,7 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	if len(req.Tools) == 0 {
 		msg, err := a.streamer.StreamChat(ctx, req)
 		if err != nil {
-			return ChatResponse{}, err
+			return ChatResponse{}, wrapProviderError(req.Provider, req.Endpoint, err)
 		}
 		return ChatResponse{
 			Message:   msg,
@@ -80,14 +81,14 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 		Message:   msg,
 		LatencyMs: time.Since(start).Milliseconds(),
 		Trace:     trace,
-	}, err
+	}, wrapProviderError(req.Provider, req.Endpoint, err)
 }
 
 // Models returns the provider's available models for the configured endpoint.
 func (a *App) Models(req ModelsRequest) (ModelsResponse, error) {
 	models, err := llm.ListModels(a.ctx, req.Provider, req.Endpoint, req.APIKey, nil)
 	if err != nil {
-		return ModelsResponse{}, err
+		return ModelsResponse{}, wrapProviderError(req.Provider, req.Endpoint, err)
 	}
 
 	return ModelsResponse{Models: models}, nil
@@ -114,4 +115,21 @@ func (a *App) SetToolEnabled(req SetToolEnabledRequest) ([]ToolMetadata, error) 
 	}
 
 	return a.tools.List(), nil
+}
+
+func wrapProviderError(provider, endpoint string, err error) error {
+	if err == nil {
+		return nil
+	}
+	target := strings.TrimSpace(provider)
+	if target == "" {
+		target = "provider"
+	}
+
+	trimmedEndpoint := strings.TrimSpace(endpoint)
+	if trimmedEndpoint != "" {
+		target = fmt.Sprintf("%s @ %s", target, trimmedEndpoint)
+	}
+
+	return fmt.Errorf("%s: %w", target, err)
 }

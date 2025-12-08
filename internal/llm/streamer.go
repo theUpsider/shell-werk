@@ -70,13 +70,17 @@ func (s *Streamer) StreamChat(ctx context.Context, req ChatRequest) (ChatMessage
 	client := MakeClient()
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, fmt.Errorf("stream request to %s failed: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		return ChatMessage{}, fmt.Errorf("streaming request failed: %s", strings.TrimSpace(string(body)))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4_096))
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			detail = resp.Status
+		}
+		return ChatMessage{}, fmt.Errorf("streaming request failed (%s): %s", resp.Status, truncate(detail, 512))
 	}
 
 	reader := bufio.NewReader(resp.Body)

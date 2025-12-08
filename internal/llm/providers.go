@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -123,18 +124,31 @@ func (p OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage,
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, fmt.Errorf("ollama request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	log.Printf("[%s] Received Ollama response", time.Now().Format(time.RFC3339))
 
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ChatMessage{}, fmt.Errorf("ollama response read failed: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		detail := strings.TrimSpace(string(rawBody))
+		if detail == "" {
+			detail = resp.Status
+		}
+		return ChatMessage{}, fmt.Errorf("ollama returned %s: %s", resp.Status, truncate(detail, 512))
+	}
+
 	var decoded ollamaResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return ChatMessage{}, err
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		return ChatMessage{}, fmt.Errorf("ollama decode failed: %w", err)
 	}
 
 	if decoded.Error != "" {
-		return ChatMessage{}, errors.New(decoded.Error)
+		return ChatMessage{}, fmt.Errorf("ollama error: %s", decoded.Error)
 	}
 
 	content := decoded.Message.Content
@@ -195,18 +209,31 @@ func (p VLLMProvider) Chat(ctx context.Context, req ChatRequest) (ChatMessage, e
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return ChatMessage{}, err
+		return ChatMessage{}, fmt.Errorf("vllm request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	log.Printf("[%s] Received VLLM response", time.Now().Format(time.RFC3339))
 
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ChatMessage{}, fmt.Errorf("vllm response read failed: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		detail := strings.TrimSpace(string(rawBody))
+		if detail == "" {
+			detail = resp.Status
+		}
+		return ChatMessage{}, fmt.Errorf("vllm returned %s: %s", resp.Status, truncate(detail, 512))
+	}
+
 	var decoded vllmResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return ChatMessage{}, err
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		return ChatMessage{}, fmt.Errorf("vllm decode failed: %w", err)
 	}
 
 	if decoded.Error.Message != "" {
-		return ChatMessage{}, errors.New(decoded.Error.Message)
+		return ChatMessage{}, fmt.Errorf("vllm error: %s", decoded.Error.Message)
 	}
 	if len(decoded.Choices) == 0 {
 		return ChatMessage{}, errors.New("empty response from vLLM")

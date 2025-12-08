@@ -16,6 +16,7 @@ import {
   type ModelConfig,
   type SettingsState,
 } from "./settings";
+import { describeError, formatProviderTarget } from "./errors";
 import { ToolTraceMessage } from "./ToolTraceMessage";
 import "./App.css";
 import "./tool-calls.css";
@@ -280,8 +281,8 @@ function App() {
         setToolCatalog(tools ?? []);
       })
       .catch((err: unknown) => {
-        const message =
-          err instanceof Error ? err.message : "Failed to load tools";
+        const message = describeError(err, "Failed to load tools");
+        console.error("[Tools] Failed to load tool catalog", err);
         setToolError(message);
       });
   }, []);
@@ -594,11 +595,18 @@ function App() {
         setLastLatencyMs(response.latencyMs ?? null);
       })
       .catch((err: unknown) => {
-        const errorText = err instanceof Error ? err.message : "Unknown error";
+        const errorText = describeError(err);
+        const providerHint = formatProviderTarget(
+          activeConfig?.provider,
+          activeConfig?.endpoint
+        );
+        console.error("[Chat] Provider request failed", err);
         applyAssistantContent(
           sessionId,
           assistantPlaceholder.id,
-          `Failed to reach provider: ${errorText}`,
+          `${
+            providerHint ? `Provider error (${providerHint})` : "Provider error"
+          }: ${errorText}`,
           updateSession
         );
         setLastLatencyMs(null);
@@ -830,8 +838,11 @@ function App() {
         });
       })
       .catch((err: unknown) => {
-        const message =
-          err instanceof Error ? err.message : "Failed to load models";
+        const message = describeError(err, "Failed to load models");
+        console.error(
+          `[Models] Failed to load models for config ${config.name}`,
+          err
+        );
         setModelErrors((prev) => ({ ...prev, [configId]: message }));
       })
       .finally(() =>
