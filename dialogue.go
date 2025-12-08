@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -314,10 +313,6 @@ func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (stri
 		return "missing command", "error"
 	}
 
-	if !isAllowedCommand(cmdName) {
-		return fmt.Sprintf("command %s is not permitted", cmdName), "error"
-	}
-
 	var cmdArgs []string
 	if rawArgs, ok := args["args"].([]any); ok {
 		for _, item := range rawArgs {
@@ -329,16 +324,15 @@ func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (stri
 		cmdArgs = append(cmdArgs, rawArgs...)
 	}
 
-	command := exec.CommandContext(ctx, cmdName, cmdArgs...)
-	var out bytes.Buffer
-	command.Stdout = &out
-	command.Stderr = &out
-
-	if err := command.Run(); err != nil {
-		return fmt.Sprintf("%s", strings.TrimSpace(out.String())), "error"
+	executor := NewShellExecutor()
+	output, err := executor.Execute(ctx, cmdName, cmdArgs)
+	if err != nil {
+		// If Execute returns an error (validation error), return it.
+		// Note: Execute returns (output, nil) even for command failure (with Error: ... in output).
+		// So err here is likely validation error.
+		return fmt.Sprintf("Validation error: %v", err), "error"
 	}
 
-	output := strings.TrimSpace(out.String())
 	if output == "" {
 		output = "(command completed with no output)"
 	}
@@ -394,11 +388,3 @@ func newTraceID() string {
 	return fmt.Sprintf("trace-%d", time.Now().UnixNano())
 }
 
-func isAllowedCommand(cmd string) bool {
-	switch strings.ToLower(cmd) {
-	case "echo", "ls", "pwd", "dir":
-		return true
-	default:
-		return false
-	}
-}

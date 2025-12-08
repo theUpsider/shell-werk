@@ -77,4 +77,26 @@ func (s *ShellExecutor) Execute(ctx context.Context, command string, args []stri
 		psArgs := append([]string{"-Command", command}, args...)
 		cmd = exec.CommandContext(ctx, "powershell", psArgs...)
 	} else {
-		// Use direct executio
+		// Use direct execution on Linux/Mac to avoid shell injection.
+		cmd = exec.CommandContext(ctx, command, args...)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Set a timeout for execution
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Sprintf("Error: %v\nStderr: %s", err, stderr.String()), nil // Return error as output so LLM sees it
+	}
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		output += "\nStderr: " + stderr.String()
+	}
+
+	return output, nil
+}

@@ -8,6 +8,7 @@ import {
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 import { loadSettings, persistSettings, type SettingsState } from "./settings";
+import { ToolTraceMessage } from "./ToolTraceMessage";
 import "./App.css";
 import "./tool-calls.css";
 
@@ -30,6 +31,8 @@ interface ChatMessage {
   content: string;
   createdAt: string;
   toolCalls?: ToolCall[];
+  isTrace?: boolean;
+  traceKind?: string;
 }
 
 interface ChatSession {
@@ -352,6 +355,8 @@ function App() {
             content:
               `${kindPrefix}${statusPrefix}${titlePrefix}${step.content}`.trim(),
             createdAt,
+            isTrace: true,
+            traceKind: step.kind,
           } satisfies ChatMessage;
         });
 
@@ -527,39 +532,69 @@ function App() {
 
         <div className="chat-feed" ref={chatScrollRef}>
           {activeSession?.messages.length ? (
-            activeSession.messages.map((message) => (
-              <div
-                key={message.id}
-                className={`message message-${message.role}`}
-              >
-                <div className="message-meta">
-                  <span className="role-label">{message.role}</span>
-                  <span className="time">
-                    {new Date(message.createdAt).toLocaleTimeString()}
-                  </span>
-                </div>
-                <div className="message-body">
-                  {message.content}
-                  {message.toolCalls && message.toolCalls.length > 0 && (
-                    <div className="tool-calls">
-                      {message.toolCalls.map((tc, idx) => (
-                        <div key={idx} className="tool-call-card">
-                          <div className="tool-call-header">
-                            Tool Request: {tc.function.name}
+            activeSession.messages.map((message) => {
+              if (message.isTrace) {
+                // Hide final trace if it's just a duplicate of the final answer
+                if (message.traceKind === "final") return null;
+                return (
+                  <ToolTraceMessage
+                    key={message.id}
+                    content={message.content}
+                    kind={message.traceKind}
+                  />
+                );
+              }
+
+              // Try to parse JSON content for assistant messages if it looks like a tool result
+              let displayContent = message.content;
+              if (
+                message.role === "assistant" &&
+                displayContent.trim().startsWith("{")
+              ) {
+                try {
+                  const parsed = JSON.parse(displayContent);
+                  if (parsed.summary) {
+                    displayContent = parsed.summary;
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+
+              return (
+                <div
+                  key={message.id}
+                  className={`message message-${message.role}`}
+                >
+                  <div className="message-meta">
+                    <span className="role-label">{message.role}</span>
+                    <span className="time">
+                      {new Date(message.createdAt).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div className="message-body">
+                    {displayContent}
+                    {message.toolCalls && message.toolCalls.length > 0 && (
+                      <div className="tool-calls">
+                        {message.toolCalls.map((tc, idx) => (
+                          <div key={idx} className="tool-call-card">
+                            <div className="tool-call-header">
+                              Tool Request: {tc.function.name}
+                            </div>
+                            <pre className="tool-call-args">
+                              {tc.function.arguments}
+                            </pre>
+                            <button onClick={() => handleRunTool(tc)}>
+                              Run Command
+                            </button>
                           </div>
-                          <pre className="tool-call-args">
-                            {tc.function.arguments}
-                          </pre>
-                          <button onClick={() => handleRunTool(tc)}>
-                            Run Command
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <div className="empty-state">
               <p>Start by asking a question or describing a task.</p>
