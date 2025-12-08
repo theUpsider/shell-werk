@@ -46,6 +46,36 @@ function buildSystemPrompt(os: string): string {
 
 export const test = base.extend({
   page: async ({ page }, use) => {
+    await page.addInitScript(() => {
+      const listeners = new Map<string, Set<(...args: any[]) => void>>();
+      const onMultiple = (eventName: string, callback: (...args: any[]) => void) => {
+        const set = listeners.get(eventName) ?? new Set();
+        set.add(callback);
+        listeners.set(eventName, set);
+        return () => set.delete(callback);
+      };
+
+      (window as any).runtime = {
+        LogPrint() {},
+        LogTrace() {},
+        LogDebug() {},
+        LogInfo() {},
+        LogWarning() {},
+        LogError() {},
+        LogFatal() {},
+        EventsOnMultiple: onMultiple,
+        EventsOn: onMultiple,
+        EventsOnce: onMultiple,
+        EventsOff: (name: string) => listeners.delete(name),
+        EventsOffAll: () => listeners.clear(),
+        EventsEmit: (eventName: string, ...args: any[]) => {
+          const set = listeners.get(eventName);
+          if (!set) return;
+          for (const cb of Array.from(set)) cb(...args);
+        },
+      };
+    });
+
     if (useMockProvider) {
       await page.addInitScript(() => {
         const respond = (content: string) => ({
