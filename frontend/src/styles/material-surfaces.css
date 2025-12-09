@@ -1,1 +1,27 @@
-.titlebar,.sidebar,.session-row,.chat-pane,.composer-box,.config-card,.trace-group-card,.tool-trace-message,.tool-call-card,.modal,.message{background:var(--md-surface-2);border:1px solid var(--md-outline);border-radius:var(--md-radius);box-shadow:var(--md-shadow);}
+.titlebar,
+.sidebar,
+.chat-pane {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.composer-box,
+.config-card,
+.trace-group-card,
+.tool-trace-message,
+.tool-call-card,
+.modal {
+  background: var(--md-surface-2);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-radius);
+  box-shadow: var(--md-shadow);
+}
+
+.message,
+.session-row {
+  background: var(--md-surface-raised);
+  border: 1px solid var(--md-outline-soft);
+  border-radius: var(--md-radius);
+  box-shadow: var(--md-shadow-soft);
+}

@@ -1,4 +1,24 @@
-.message{padding:12px;max-width:780px;}
-.message-user{align-self:flex-end;background:rgba(79,124,255,.08);}
-.message-assistant{align-self:flex-start;}
-.message-tool{align-self:center;border-style:dashed;border-color:var(--md-primary);background:rgba(79,124,255,.05);color:var(--md-muted);}
+.message {
+  padding: 12px;
+  max-width: 780px;
+}
+.message-user {
+  align-self: flex-end;
+  background: linear-gradient(
+    135deg,
+    rgba(79, 124, 255, 0.18),
+    var(--md-surface-raised)
+  );
+  border-color: rgba(79, 124, 255, 0.35);
+}
+.message-assistant {
+  align-self: flex-start;
+  background: var(--md-surface-raised);
+}
+.message-tool {
+  align-self: center;
+  border-style: dashed;
+  border-color: var(--md-primary);
+  background: rgba(79, 124, 255, 0.05);
+  color: var(--md-muted);
+}
