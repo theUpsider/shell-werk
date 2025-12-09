@@ -67,6 +67,9 @@ func (e *Executor) Execute(ctx context.Context, command string, args []string) (
 		return "", err
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		psArgs := append([]string{"-Command", command}, args...)
@@ -79,12 +82,18 @@ func (e *Executor) Execute(ctx context.Context, command string, args []string) (
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Set a timeout for execution
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
 	if err := cmd.Run(); err != nil {
-		return fmt.Sprintf("Error: %v\nStderr: %s", err, stderr.String()), nil // Return error as output so LLM sees it
+		output := strings.TrimSpace(stdout.String())
+		if stderr.Len() > 0 {
+			if output != "" {
+				output += "\n"
+			}
+			output += "Stderr: " + strings.TrimSpace(stderr.String())
+		}
+		if output == "" {
+			output = "(command failed with no output)"
+		}
+		return output, fmt.Errorf("command failed: %v", err)
 	}
 
 	output := stdout.String()

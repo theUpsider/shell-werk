@@ -75,7 +75,7 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	loop := llm.NewDialogueLoop(req)
+	loop := llm.NewDialogueLoop(req, a.events)
 	msg, trace, err := loop.Run(ctx, req)
 	return ChatResponse{
 		Message:   msg,

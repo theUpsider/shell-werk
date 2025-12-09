@@ -32,9 +32,11 @@ type dialogueLoop struct {
 	client            *http.Client
 	webSearchAPIKey   string
 	webSearchEndpoint string
+	sink              StreamEventSink
+	sessionID         string
 }
 
-func NewDialogueLoop(req ChatRequest) *dialogueLoop {
+func NewDialogueLoop(req ChatRequest, sink StreamEventSink) *dialogueLoop {
 	webSearchEndpoint := braveSearchEndpointDefault
 	if trimmed := strings.TrimSpace(req.WebSearchEndpoint); trimmed != "" {
 		webSearchEndpoint = trimmed
@@ -50,12 +52,15 @@ func NewDialogueLoop(req ChatRequest) *dialogueLoop {
 		client:            MakeClient(),
 		webSearchAPIKey:   strings.TrimSpace(req.WebSearchAPIKey),
 		webSearchEndpoint: webSearchEndpoint,
+		sink:              sink,
+		sessionID:         strings.TrimSpace(req.SessionID),
 	}
 }
 
 func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, []DialogueTrace, error) {
 	trace := []DialogueTrace{}
 	start := time.Now()
+	failures := map[string]int{}
 
 	toolDefs := l.toolDefs
 	messages := []chatCompletionMessage{
@@ -100,8 +105,13 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 			return ChatMessage{Role: assistantMsg.Role, Content: assistantMsg.Content}, trace, nil
 		}
 
+		if len(choice.Message.ToolCalls) > 0 {
+			l.emitThinkingf("%s", assistantMsg.Content)
+		}
+
 		for _, tc := range choice.Message.ToolCalls {
 			argsMap, parseErr := parseArguments(tc.Function.Arguments)
+			callPreview := truncate(tc.Function.Arguments, 200)
 			trace = append(trace, DialogueTrace{
 				ID:        newTraceID(),
 				Role:      "tool",
@@ -111,6 +121,11 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 				Content:   fmt.Sprintf("Calling %s with %s", tc.Function.Name, truncate(tc.Function.Arguments, 320)),
 				CreatedAt: time.Now(),
 			})
+			if callPreview != "" {
+				l.emitThinkingf("Running %s (%s)", tc.Function.Name, callPreview)
+			} else {
+				l.emitThinkingf("Running %s", tc.Function.Name)
+			}
 
 			if tc.Function.Name == "request_fullfilled" {
 				summary := contentFromRequestFulfilled(argsMap, assistantMsg.Content)
@@ -135,6 +150,7 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 					Content:   fmt.Sprintf("invalid arguments: %v", parseErr),
 					CreatedAt: time.Now(),
 				})
+				l.emitThinkingf("%s failed: invalid arguments", tc.Function.Name)
 				continue
 			}
 
@@ -148,6 +164,23 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 				Content:   result,
 				CreatedAt: time.Now(),
 			})
+			l.emitThinkingf("%s %s", tc.Function.Name, status)
+
+			if status == "error" {
+				key := fmt.Sprintf("%s|%s", tc.Function.Name, tc.Function.Arguments)
+				failures[key]++
+				if failures[key] >= 2 {
+					trace = append(trace, DialogueTrace{
+						ID:        newTraceID(),
+						Role:      "assistant",
+						Kind:      "final",
+						Status:    "failed",
+						Content:   fmt.Sprintf("Stopping after repeated %s tool failures: %s", tc.Function.Name, result),
+						CreatedAt: time.Now(),
+					})
+					return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Stopping after repeated %s tool failures: %s", tc.Function.Name, result)}, trace, errors.New("dialogue loop halted after repeated tool errors")
+				}
+			}
 
 			messages = append(messages, chatCompletionMessage{
 				Role:       "tool",
@@ -304,7 +337,11 @@ func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (stri
 	executor := shell.NewExecutor()
 	output, err := executor.Execute(ctx, cmdName, cmdArgs)
 	if err != nil {
-		return fmt.Sprintf("Validation error: %v", err), "error"
+		failure := strings.TrimSpace(output)
+		if failure == "" {
+			failure = err.Error()
+		}
+		return truncate(failure, 2_048), "error"
 	}
 
 	if output == "" {
@@ -434,5 +471,24 @@ func (l *dialogueLoop) systemPrompt() string {
 		shellHint = "Shell tool uses PowerShell; prefer PowerShell-friendly commands and paths."
 	}
 
-	return fmt.Sprintf("You are shell-werk. Host OS: %s. %s When tools are present, use them. When the user request is satisfied, call the tool request_fullfilled with a concise summary.", hostOS, shellHint)
+	return fmt.Sprintf(
+		"You are a helpful assistant named shell-werk. The Host OS is: %s. %s . Prefer web_search for factual lookups; only use shell when the user explicitly asks for commands. Do not retry missing commands; Use as few tool calls as possible to generate the final answer. When the user request is satisfied, immediatly call the tool request_fullfilled with a concise summary.",
+		hostOS,
+		shellHint,
+	)
+}
+
+func (l *dialogueLoop) emitThinkingf(format string, args ...any) {
+	if l.sink == nil || l.sessionID == "" {
+		return
+	}
+
+	chunk := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if chunk == "" {
+		return
+	}
+
+	chunk = truncate(chunk, 512) + "\n"
+
+	l.sink.ThinkingUpdate(l.sessionID, chunk)
 }

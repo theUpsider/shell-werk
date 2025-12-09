@@ -77,6 +77,10 @@ interface ToolMetadata {
   enabled: boolean;
 }
 
+type FeedItem =
+  | { kind: "message"; message: ChatMessage }
+  | { kind: "trace-group"; id: string; traces: ChatMessage[] };
+
 const THINKING_START_EVENT = "thinking:start";
 const THINKING_UPDATE_EVENT = "thinking:update";
 const THINKING_END_EVENT = "thinking:end";
@@ -146,6 +150,54 @@ const applyAssistantContent = (
   }));
 };
 
+interface TraceGroupProps {
+  traces: ChatMessage[];
+}
+
+const TraceGroup: React.FC<TraceGroupProps> = ({ traces }) => {
+  const [collapsed, setCollapsed] = useState(true);
+  const first = traces[0];
+  const title = `Tool calls (${traces.length})`;
+  const createdTime = first?.createdAt
+    ? new Date(first.createdAt).toLocaleTimeString()
+    : "";
+
+  return (
+    <div className="trace-group-card" data-collapsed={collapsed}>
+      <button
+        type="button"
+        className="trace-group-toggle"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((prev) => !prev)}
+      >
+        <div className="trace-group-meta">
+          <span className="trace-group-title">{title}</span>
+          {createdTime && (
+            <span className="trace-group-time" aria-label="Timestamp">
+              {createdTime}
+            </span>
+          )}
+        </div>
+        <span className="trace-group-chevron" aria-hidden="true">
+          {collapsed ? "▸" : "▾"}
+        </span>
+      </button>
+      {!collapsed && (
+        <div className="trace-group-body">
+          {traces.map((trace) => (
+            <ToolTraceMessage
+              key={trace.id}
+              content={trace.content}
+              kind={trace.traceKind}
+              initiallyCollapsed
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 function App() {
   const [toolCatalog, setToolCatalog] = useState<ToolMetadata[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
@@ -205,6 +257,33 @@ function App() {
     () => sessions.find((s) => s.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions]
   );
+
+  const feedItems = useMemo<FeedItem[]>(() => {
+    const items: FeedItem[] = [];
+    const messages = activeSession?.messages ?? [];
+    let buffer: ChatMessage[] = [];
+
+    const flush = () => {
+      if (!buffer.length) return;
+      const groupId = buffer.map((entry) => entry.id).join("-") || createId();
+      items.push({ kind: "trace-group", id: groupId, traces: buffer });
+      buffer = [];
+    };
+
+    messages.forEach((message) => {
+      if (message.isTrace) {
+        if (message.traceKind === "final") return;
+        buffer.push(message);
+        return;
+      }
+
+      flush();
+      items.push({ kind: "message", message });
+    });
+
+    flush();
+    return items;
+  }, [activeSession?.messages]);
 
   const hiddenDisabled = useMemo(
     () => new Set(settings.hiddenToolsDisabled ?? []),
@@ -560,7 +639,7 @@ function App() {
           const role: Role = step.role === "tool" ? "tool" : "assistant";
           const statusPrefix = step.status ? `[${step.status}] ` : "";
           const titlePrefix = step.title ? `${step.title}: ` : "";
-          const kindPrefix = step.kind ? `${step.kind} · ` : "";
+          const kindPrefix = step.kind ? `${step.kind} - ` : "";
           return {
             id: createId(),
             role,
@@ -888,7 +967,7 @@ function App() {
                   }
                   aria-label={`Delete chat ${session.title || "chat"}`}
                 >
-                  <span aria-hidden="true">×</span>
+                  <span aria-hidden="true">x</span>
                 </button>
               </div>
             );
@@ -921,19 +1000,13 @@ function App() {
         </div>
 
         <div className="chat-feed" ref={chatScrollRef}>
-          {activeSession?.messages.length ? (
-            activeSession.messages.map((message) => {
-              if (message.isTrace) {
-                // Hide final trace if it's just a duplicate of the final answer
-                if (message.traceKind === "final") return null;
-                return (
-                  <ToolTraceMessage
-                    key={message.id}
-                    content={message.content}
-                    kind={message.traceKind}
-                  />
-                );
+          {feedItems.length ? (
+            feedItems.map((item) => {
+              if (item.kind === "trace-group") {
+                return <TraceGroup key={item.id} traces={item.traces} />;
               }
+
+              const message = item.message;
 
               // Try to parse JSON content for assistant messages if it looks like a tool result
               let displayContent = message.content;
@@ -1112,7 +1185,8 @@ function App() {
               {toolError && <span className="error-text">{toolError}</span>}
               {missingWebSearchKey && (
                 <span className="error-text">
-                  Add your Brave Search API key in Settings to enable Web Search.
+                  Add your Brave Search API key in Settings to enable Web
+                  Search.
                 </span>
               )}
             </div>

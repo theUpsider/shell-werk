@@ -44,52 +44,75 @@
 
 /* Tool Trace Styling */
 .tool-trace-message {
-  margin: 0.25rem 0;
-  font-size: 0.85rem;
-  border-left: 2px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 0 4px 4px 0;
+  margin: 0.35rem 0;
+  font-size: 0.88rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 15, 24, 0.6);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  border-left: 3px solid #0cbaba;
 }
 
 .tool-trace-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
+  padding: 0.55rem 0.75rem;
   width: 100%;
   background: transparent;
   border: none;
-  color: inherit;
+  color: #eaf3ff;
   cursor: pointer;
   text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+  min-height: 48px;
 }
 
 .tool-trace-header:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.tool-trace-header:focus-visible {
+  outline: 2px solid #8af6e7;
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
 .trace-kind {
   text-transform: uppercase;
   font-size: 0.7rem;
-  font-weight: bold;
-  padding: 0.1rem 0.3rem;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  font-weight: 800;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: #1e2633;
+  color: #f2f7ff;
+  letter-spacing: 0.04em;
 }
 
 .trace-kind.tool_call {
-  background: rgba(12, 186, 186, 0.2);
-  color: #0cbaba;
+  background: #0a2f32;
+  color: #8af6e7;
 }
 
 .trace-kind.tool_result {
-  background: rgba(255, 255, 255, 0.1);
+  background: #202a3a;
+  color: #f2f7ff;
 }
 
 .trace-kind.error {
-  background: rgba(255, 80, 80, 0.2);
-  color: #ff5050;
+  background: #3b0e12;
+  color: #ffd7d7;
+}
+
+.trace-status {
+  padding: 0.18rem 0.5rem;
+  border-radius: 8px;
+  background: #1f2b3c;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f5f8ff;
+  text-transform: capitalize;
 }
 
 .trace-preview {
@@ -97,21 +120,119 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0.8;
-  font-family: monospace;
+  opacity: 0.9;
+  color: #d7e8ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 .trace-toggle {
   font-size: 0.7rem;
-  opacity: 0.5;
+  opacity: 0.65;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #121824;
+  color: #e8f1ff;
+}
+
+[data-kind="tool_call"] {
+  border-left-color: #0cbaba;
+}
+
+[data-kind="tool_result"] {
+  border-left-color: #8af6e7;
+}
+
+[data-kind="error"] {
+  border-left-color: #ff8686;
+}
+
+.chevron {
+  display: inline-block;
+  transition: transform 160ms ease;
+}
+
+.chevron-open {
+  transform: rotate(90deg);
+}
+
+.chevron-collapsed {
+  transform: rotate(0deg);
 }
 
 .tool-trace-content {
-  padding: 0.5rem 0.6rem;
+  padding: 0.6rem 0.75rem 0.75rem;
   background: rgba(0, 0, 0, 0.2);
-  font-family: monospace;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.trace-group-card {
+  margin: 0.9rem 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #0f1624 0%, #0c111b 100%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.trace-group-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  background: transparent;
+  border: none;
+  color: #eaf3ff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.trace-group-toggle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.trace-group-toggle:focus-visible {
+  outline: 2px solid #8af6e7;
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.trace-group-meta {
+  display: flex;
+  gap: 0.2rem;
+  flex-direction: column;
+}
+
+.trace-group-title {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.trace-group-time {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.trace-group-chevron {
+  font-size: 1rem;
+  opacity: 0.7;
+  transition: transform 160ms ease;
+}
+
+.trace-group-card[data-collapsed="false"] .trace-group-chevron {
+  transform: rotate(90deg);
+}
+
+.trace-group-body {
+  padding: 0.25rem 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
