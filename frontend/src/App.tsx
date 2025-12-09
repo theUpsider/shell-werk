@@ -245,8 +245,6 @@ function App() {
     () => visibleTools.filter((tool) => !activeToolChoices[tool.id]),
     [activeToolChoices, visibleTools]
   );
-  const missingWebSearchKey =
-    visibleTools.some((tool) => tool.id === "web_search") && !webSearchReady;
 
   useEffect(() => {
     GetTools()
@@ -912,15 +910,14 @@ function App() {
           onEnterKey={handleEnterKey}
           onSend={handleSend}
           onCancel={handleCancelSend}
-          isActiveSending={isActiveSending}
-          enabledVisibleTools={enabledVisibleTools}
-          disabledVisibleTools={disabledVisibleTools}
-          toolError={toolError}
-          missingWebSearchKey={missingWebSearchKey}
-          chatOnly={settings.chatOnly}
-          webSearchReady={webSearchReady}
-          onToggleTool={handleToggleTool}
-        />
+            isActiveSending={isActiveSending}
+            enabledVisibleTools={enabledVisibleTools}
+            disabledVisibleTools={disabledVisibleTools}
+            toolError={toolError}
+            chatOnly={settings.chatOnly}
+            webSearchReady={webSearchReady}
+            onToggleTool={handleToggleTool}
+          />
       </main>
 
       {showSettings && (

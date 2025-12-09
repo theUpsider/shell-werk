@@ -12,7 +12,6 @@ interface ComposerProps {
   enabledVisibleTools: ToolMetadata[];
   disabledVisibleTools: ToolMetadata[];
   toolError: string | null;
-  missingWebSearchKey: boolean;
   chatOnly: boolean;
   webSearchReady: boolean;
   onToggleTool: (toolId: string) => void;
@@ -28,7 +27,6 @@ export const Composer: React.FC<ComposerProps> = ({
   enabledVisibleTools,
   disabledVisibleTools,
   toolError,
-  missingWebSearchKey,
   chatOnly,
   webSearchReady,
   onToggleTool,
@@ -93,11 +91,6 @@ export const Composer: React.FC<ComposerProps> = ({
             )}
           </div>
           {toolError && <span className="error-text">{toolError}</span>}
-          {missingWebSearchKey && (
-            <span className="error-text">
-              Add your Brave Search API key in Settings to enable Web Search.
-            </span>
-          )}
         </div>
         <div className="composer-input-row">
           <textarea
