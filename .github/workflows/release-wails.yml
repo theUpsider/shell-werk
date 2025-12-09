@@ -80,25 +80,37 @@ jobs:
         shell: bash
 
       - name: Package archives
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p dist
 
-          # Package Linux binary
           echo "Packaging Linux binary..."
-          cd artifacts/linux-amd64/build/bin
-          tar -czf ../../../../dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz *
-          cd -
+          LINUX_BIN=$(find artifacts/linux-amd64 -maxdepth 8 -type f -executable ! -name "*.so" ! -name "*.dll" ! -name "*.exe" | head -n1)
+          if [ -z "$LINUX_BIN" ]; then
+            echo "Linux binary not found under artifacts/linux-amd64" >&2
+            find artifacts/linux-amd64 -maxdepth 8 -type f -print || true
+            exit 1
+          fi
+          cp "$LINUX_BIN" dist/shell-werk
+          tar -C dist -czf dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz shell-werk
+          rm -f dist/shell-werk
 
-          # Package Windows installer (NSIS) - this is the main distributable
-          echo "Packaging Windows installer..."
-          cd artifacts/windows-amd64/build/bin
-          cp shell-werk-amd64-installer.exe ../../../../dist/shell-werk-${{ github.ref_name }}-windows-amd64-installer.exe
-          cd -
+          echo "Locating Windows installer (NSIS)..."
+          WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
+          if [ -z "$WIN_INSTALLER" ]; then
+            echo "NSIS installer not found, falling back to main exe"
+            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*.exe" ! -iname "*uninst*" | head -n1)
+          fi
+          if [ -z "$WIN_INSTALLER" ]; then
+            echo "Windows exe/installer not found under artifacts/windows-amd64" >&2
+            find artifacts/windows-amd64 -maxdepth 8 -type f -print || true
+            exit 1
+          fi
+          cp "$WIN_INSTALLER" "dist/shell-werk-${{ github.ref_name }}-windows-amd64-installer.exe"
 
           echo "Release artifacts created:"
           ls -lh dist/
-        shell: bash
 
       - name: Publish Release (upload assets)
         uses: softprops/action-gh-release@v2
