@@ -1,6 +1,26 @@
-.modal label{display:flex;flex-direction:column;gap:6px;font-weight:700;}
-.label-text{color:var(--md-muted);}
-.modal input,.modal select{border-radius:10px;border:1px solid var(--md-outline);background:var(--md-surface);color:var(--md-text);padding:10px 12px;}
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+}
+.label-text {
+  color: var(--md-muted);
+}
+.modal input,
+.modal select {
+  border-radius: 10px;
+  border: 1px solid var(--md-outline);
+  background: var(--md-surface);
+  color: var(--md-text);
+  padding: 10px 12px;
+}
 /* Inline toggle labels (e.g., Active, Hidden tools) */
-.inline-toggle{display:inline-flex;align-items:center;gap:8px;}
-.inline-toggle>span{color:var(--md-text);}
+.inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.inline-toggle > span {
+  color: var(--md-text);
+}

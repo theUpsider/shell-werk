@@ -46,9 +46,9 @@ test.describe("REQ-013: Dialogue Feedback Loop", () => {
       };
     });
 
-    await page
-      .getByPlaceholder("Ask shell werk what to do...")
-      .fill("Trigger trace");
+    const composer = page.getByPlaceholder("Ask shell werk what to do...");
+    await composer.waitFor();
+    await composer.fill("Trigger trace");
     await page.getByRole("button", { name: "Send" }).click();
     // Expand the trace group to reveal trace items
     await page.getByRole("button", { name: /Tool calls/i }).click();

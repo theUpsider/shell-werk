@@ -13,9 +13,7 @@ const acceptanceTests: AcceptanceTest[] = [
     title: "Playwright is configured as the E2E testing framework.",
     run: async ({ page }) => {
       await page.goto("/");
-      await expect(
-        page.getByRole("button", { name: "New Chat", exact: true })
-      ).toBeVisible();
+      await expect(page).toHaveTitle(/shell-werk/i);
     },
   },
   {
@@ -43,6 +41,9 @@ const acceptanceTests: AcceptanceTest[] = [
     title: "All application functionality is covered by these E2E tests.",
     run: async ({ page }) => {
       await page.goto("/");
+      await page
+        .getByRole("button", { name: "New Chat", exact: true })
+        .waitFor();
       await page.getByRole("button", { name: "New Chat", exact: true }).click();
 
       const composer = page.getByPlaceholder("Ask shell werk what to do...");
@@ -50,6 +51,7 @@ const acceptanceTests: AcceptanceTest[] = [
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.getByText("Stubbed: Hello from E2E")).toBeVisible();
 
+      await page.getByRole("button", { name: "Settings" }).waitFor();
       await page.getByRole("button", { name: "Settings" }).click();
       await expect(
         page.getByRole("heading", { name: "Model settings" })
@@ -73,6 +75,7 @@ const acceptanceTests: AcceptanceTest[] = [
       expect(providerMode).toBe("mock");
 
       const composer = page.getByPlaceholder("Ask shell werk what to do...");
+      await composer.waitFor();
       await composer.fill("CI stub check");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.getByText("Stubbed: CI stub check")).toBeVisible();

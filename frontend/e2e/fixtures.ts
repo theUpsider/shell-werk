@@ -47,15 +47,26 @@ function buildSystemPrompt(os: string): string {
 export const test = base.extend({
   page: async ({ page }, use) => {
     await page.addInitScript(() => {
+      try {
+        (globalThis as any).localStorage?.clear?.();
+        (globalThis as any).sessionStorage?.clear?.();
+      } catch (e) {
+        // ignore
+      }
+    });
+    await page.addInitScript(() => {
       const listeners = new Map<string, Set<(...args: any[]) => void>>();
-      const onMultiple = (eventName: string, callback: (...args: any[]) => void) => {
+      const onMultiple = (
+        eventName: string,
+        callback: (...args: any[]) => void
+      ) => {
         const set = listeners.get(eventName) ?? new Set();
         set.add(callback);
         listeners.set(eventName, set);
         return () => set.delete(callback);
       };
 
-      (window as any).runtime = {
+      (globalThis as any).runtime = {
         LogPrint() {},
         LogTrace() {},
         LogDebug() {},
@@ -73,6 +84,10 @@ export const test = base.extend({
           if (!set) return;
           for (const cb of Array.from(set)) cb(...args);
         },
+        WindowIsMaximised: () => Promise.resolve(false),
+        WindowToggleMaximise: () => Promise.resolve(),
+        WindowMinimise: () => Promise.resolve(),
+        Quit: () => Promise.resolve(),
       };
     });
 

@@ -5,6 +5,7 @@ const TOOL_DESCRIPTION = "Fetch web content for context.";
 
 const openSettings = async (page: Page) => {
   await test.step("open settings", async () => {
+    await page.getByRole("button", { name: "Settings" }).waitFor();
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(
       page.getByRole("heading", { name: "Model settings" })
@@ -24,11 +25,13 @@ test.describe("REQ-012: Tool Toggling in Chat Interface", () => {
     await page.goto("/");
 
     const toggleRow = page.getByLabel("Tool toggles");
+    await toggleRow.waitFor();
     await expect(
       toggleRow.getByRole("button", { name: "Disable Browser" })
     ).toBeDisabled();
 
     const composer = page.getByPlaceholder("Ask shell werk what to do...");
+    await composer.waitFor();
     await composer.fill("Chat-only check");
     await page.getByRole("button", { name: "Send" }).click();
 
@@ -46,6 +49,7 @@ test.describe("REQ-012: Tool Toggling in Chat Interface", () => {
     await page.goto("/");
 
     const toggleRow = page.getByLabel("Tool toggles");
+    await toggleRow.waitFor();
     const browserPill = toggleRow.getByRole("button", {
       name: "Disable Browser",
     });

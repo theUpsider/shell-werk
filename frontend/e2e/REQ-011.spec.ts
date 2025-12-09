@@ -5,7 +5,7 @@ test.describe("REQ-011: Tool UI Visibility Configuration", () => {
     page,
   }) => {
     await page.goto("/");
-
+    await page.getByRole("button", { name: "Settings" }).waitFor();
     await page.getByRole("button", { name: "Settings" }).click();
     await page.getByLabel("Chat Only mode (disable tools)").uncheck();
 

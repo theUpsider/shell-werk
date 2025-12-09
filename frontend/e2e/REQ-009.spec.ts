@@ -12,7 +12,7 @@ test.describe("REQ-009: LLM Provider Configuration", () => {
     page,
   }) => {
     await page.goto("/");
-
+    await page.getByRole("button", { name: "Settings" }).waitFor();
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(
       page.getByRole("heading", { name: "Model settings" })
