@@ -83,19 +83,19 @@ jobs:
         run: |
           set -e
           mkdir -p dist
-          
+
           # Package Linux binary
           echo "Packaging Linux binary..."
           cd artifacts/linux-amd64/build/bin
           tar -czf ../../../../dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz *
           cd -
-          
+
           # Package Windows installer (NSIS) - this is the main distributable
           echo "Packaging Windows installer..."
           cd artifacts/windows-amd64/build/bin
           cp shell-werk-amd64-installer.exe ../../../../dist/shell-werk-${{ github.ref_name }}-windows-amd64-installer.exe
           cd -
-          
+
           echo "Release artifacts created:"
           ls -lh dist/
         shell: bash
