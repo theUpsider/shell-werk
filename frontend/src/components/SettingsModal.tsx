@@ -118,7 +118,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="ghost"
                           onClick={() => onDeleteConfig(config.id)}
                           disabled={settings.configs.length <= 1}
-                          aria-label={`Delete ${config.name || `config ${index + 1}`}`}
+                          aria-label={`Delete ${
+                            config.name || `config ${index + 1}`
+                          }`}
                         >
                           Delete
                         </button>
@@ -130,7 +132,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <select
                           value={config.provider}
                           onChange={(e) =>
-                            onConfigChange(config.id, "provider", e.target.value)
+                            onConfigChange(
+                              config.id,
+                              "provider",
+                              e.target.value
+                            )
                           }
                         >
                           <option value="ollama">Ollama</option>
@@ -144,7 +150,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           type="text"
                           value={config.endpoint}
                           onChange={(e) =>
-                            onConfigChange(config.id, "endpoint", e.target.value)
+                            onConfigChange(
+                              config.id,
+                              "endpoint",
+                              e.target.value
+                            )
                           }
                           placeholder="http://localhost:11434"
                         />
@@ -197,9 +207,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       >
                         {loading ? "Loading models..." : "Load models"}
                       </button>
-                      {modelError && <span className="error-text">{modelError}</span>}
+                      {modelError && (
+                        <span className="error-text">{modelError}</span>
+                      )}
                       {!modelError && models.length > 0 && (
-                        <span className="muted">{models.length} models available</span>
+                        <span className="muted">
+                          {models.length} models available
+                        </span>
                       )}
                     </div>
                   </div>
@@ -248,7 +262,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="modal-section">
               <p className="section-title">Hidden tools</p>
               <p className="section-hint">
-                Toggle global availability for tools that are not shown in the chat UI.
+                Toggle global availability for tools that are not shown in the
+                chat UI.
               </p>
               <div className="hidden-tools" aria-label="Hidden tools">
                 <div className="hidden-tool-grid">
