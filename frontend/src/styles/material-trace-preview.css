@@ -1,0 +1,2 @@
+.trace-preview{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9;color:var(--md-text);font-family:monospace;}
+.trace-toggle{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--md-outline);color:var(--md-text);}

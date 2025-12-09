@@ -1,0 +1,3 @@
+.trace-kind.tool_call{background:rgba(79,124,255,.16);color:var(--md-primary);}
+.trace-kind.tool_result{background:rgba(243,198,35,.14);color:var(--md-accent);}
+.trace-kind.error{background:rgba(255,107,107,.2);color:var(--md-danger);}

@@ -1,0 +1,4 @@
+.trace-group-card{margin:10px 0;}
+.trace-group-toggle{width:100%;display:flex;justify-content:space-between;align-items:center;padding:10px;border:none;background:transparent;color:var(--md-text);cursor:pointer;text-align:left;}
+.trace-group-meta{display:flex;gap:4px;flex-direction:column;}
+.trace-group-title{font-weight:700;letter-spacing:.01em;}

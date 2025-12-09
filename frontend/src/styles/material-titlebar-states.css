@@ -1,0 +1,3 @@
+.titlebar-btn:hover{border-color:var(--md-primary);color:var(--md-primary);}
+.titlebar-btn.close{color:var(--md-danger);}
+.titlebar-btn.close:hover{background:var(--md-danger);color:var(--md-on-primary);}

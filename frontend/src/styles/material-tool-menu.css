@@ -1,0 +1,2 @@
+.tool-menu{position:absolute;top:110%;right:0;min-width:190px;padding:6px;border-radius:12px;background:var(--md-surface-2);border:1px solid var(--md-outline);box-shadow:var(--md-shadow);display:flex;flex-direction:column;gap:4px;z-index:5;}
+.tool-menu-empty{color:var(--md-muted);font-size:.9rem;padding:8px;}

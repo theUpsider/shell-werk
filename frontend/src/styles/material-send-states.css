@@ -1,0 +1,4 @@
+.send-button:hover:not(:disabled){filter:brightness(1.05);}
+.send-button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;}
+.send-button.cancel{width:auto;min-width:108px;padding:0 12px;background:var(--md-danger);color:var(--md-on-primary);box-shadow:0 10px 22px rgba(255,107,107,.3);}
+.send-button.cancel:hover:not(:disabled){filter:brightness(1.05);}

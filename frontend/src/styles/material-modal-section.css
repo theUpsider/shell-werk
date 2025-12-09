@@ -1,0 +1,4 @@
+.modal-section{display:flex;flex-direction:column;gap:8px;padding:6px 0;border-bottom:1px solid var(--md-outline);}
+.modal-section:last-of-type{border-bottom:none;}
+.section-title{margin:0;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;color:var(--md-text);}
+.section-hint{margin:0;color:var(--md-muted);font-size:.95rem;}

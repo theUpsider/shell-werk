@@ -1,0 +1,4 @@
+.primary.destructive{background:var(--md-danger);}
+.primary:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;}
+.primary:not(:disabled):hover{filter:brightness(1.05);}
+.ghost:hover{border-color:var(--md-primary);}

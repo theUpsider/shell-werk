@@ -1,0 +1,2 @@
+.session-delete{width:32px;height:32px;border-radius:50%;border:1px solid var(--md-outline);background:var(--md-surface-2);color:var(--md-muted);display:grid;place-items:center;cursor:pointer;transition:.16s ease;}
+.session-delete:hover{color:var(--md-danger);}

@@ -1,0 +1,2 @@
+.message-meta{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--md-muted);margin-bottom:6px;text-transform:capitalize;}
+.message-body{font-size:1rem;line-height:1.5;color:var(--md-text);}

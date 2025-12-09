@@ -1,0 +1,3 @@
+.tool-menu button{border:none;background:transparent;color:var(--md-text);text-align:left;padding:8px;border-radius:10px;cursor:pointer;}
+.tool-menu button:hover:not(:disabled){background:rgba(79,124,255,.14);color:var(--md-primary);}
+.tool-menu button:disabled{opacity:.5;cursor:not-allowed;}

@@ -1,0 +1,3 @@
+.primary,.ghost{border-radius:12px;padding:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:.16s ease;border:1px solid var(--md-outline);}
+.primary{background:var(--md-primary);color:var(--md-on-primary);box-shadow:0 6px 16px rgba(79,124,255,.35);}
+.ghost{background:rgba(255,255,255,.03);color:var(--md-text);}

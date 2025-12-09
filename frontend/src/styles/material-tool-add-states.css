@@ -1,0 +1,2 @@
+.tool-add:hover:not(:disabled){border-color:var(--md-primary);color:var(--md-primary);}
+.tool-add:disabled{opacity:.5;cursor:not-allowed;}

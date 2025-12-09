@@ -1,0 +1,4 @@
+.tool-calls{margin-top:8px;display:flex;flex-direction:column;gap:8px;}
+.tool-call-card{padding:12px;}
+.tool-call-header{font-weight:700;margin:0 0 6px;color:var(--md-primary);}
+.tool-call-args{background:var(--md-surface);padding:8px;border-radius:10px;font-family:monospace;font-size:.9rem;margin:0 0 6px;overflow-x:auto;}

@@ -1,0 +1,4 @@
+.trace-group-time{font-size:.82rem;color:var(--md-muted);}
+.trace-group-chevron{font-size:1rem;opacity:.7;transition:transform .16s ease;}
+.trace-group-card[data-collapsed="false"] .trace-group-chevron{transform:rotate(90deg);}
+.trace-group-body{padding:6px 10px 10px;display:flex;flex-direction:column;gap:8px;}

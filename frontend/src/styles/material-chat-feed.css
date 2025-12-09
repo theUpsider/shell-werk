@@ -1,0 +1,2 @@
+.chat-feed{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:10px;border:1px solid var(--md-outline);border-radius:12px;background:radial-gradient(circle at 18% 20%,rgba(79,124,255,.06),transparent 30%),var(--md-surface);}
+.empty-state{text-align:center;color:var(--md-muted);padding:24px 12px;}

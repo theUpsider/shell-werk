@@ -1,0 +1,3 @@
+.chevron{display:inline-block;transition:transform .16s ease;}
+.chevron-open{transform:rotate(90deg);}
+.chevron-collapsed{transform:rotate(0deg);}

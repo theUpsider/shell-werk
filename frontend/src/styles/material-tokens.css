@@ -1,0 +1,15 @@
+:root{
+--md-font:"Roboto","Inter",system-ui,sans-serif;
+--md-primary:#4f7cff;
+--md-on-primary:#0b1224;
+--md-surface:#0f1724;
+--md-surface-2:#122033;
+--md-outline:#25354b;
+--md-text:#e6edf7;
+--md-muted:#a6b6c8;
+--md-accent:#f3c623;
+--md-danger:#ff6b6b;
+--md-radius:14px;
+--md-gap:12px;
+--md-shadow:0 10px 30px rgba(0,0,0,.32);
+}

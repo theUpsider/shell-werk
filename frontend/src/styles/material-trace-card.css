@@ -1,0 +1,4 @@
+.tool-trace-message{margin:8px 0;border-left:3px solid var(--md-primary);}
+.tool-trace-content{padding:8px;border-top:1px solid var(--md-outline);font-family:monospace;white-space:pre-wrap;word-break:break-word;background:var(--md-surface);}
+[data-kind="tool_result"]{border-left-color:var(--md-accent);}
+[data-kind="error"]{border-left-color:var(--md-danger);}

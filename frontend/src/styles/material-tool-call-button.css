@@ -1,0 +1,2 @@
+.tool-call-card button{background:var(--md-primary);color:var(--md-on-primary);border:none;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer;}
+.tool-call-card button:hover{filter:brightness(1.05);}

@@ -1,0 +1,2 @@
+.composer-input-row{position:relative;display:flex;}
+.composer-input-row textarea{width:100%;min-height:110px;resize:none;border-radius:12px;border:1px solid var(--md-outline);background:var(--md-surface);color:var(--md-text);padding:12px 14px;padding-right:3.5rem;font-size:1rem;line-height:1.5;}
