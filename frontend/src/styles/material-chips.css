@@ -1,16 +1,22 @@
 .chip {
-	padding: 4px 10px;
-	border-radius: 999px;
-	background: var(--md-primary);
-	color: var(--md-on-primary);
-	font-size: 0.85rem;
-	font-weight: 600;
-	line-height: 1.2;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
 }
 .chip-row {
-	display: flex;
-	gap: 6px;
-	align-items: center;
-	flex-wrap: wrap;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
 }
-.role-label{padding:4px 10px;border-radius:999px;background:var(--md-outline);color:var(--md-text);border:1px solid var(--md-outline);}
+.role-label {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--md-outline);
+  color: var(--md-text);
+  border: 1px solid var(--md-outline);
+}
