@@ -20,12 +20,12 @@ jobs:
             platform: linux/amd64
             os: ubuntu-latest
             label: linux-amd64
-            nsis: 'false'
+            nsis: "false"
           - name: shell-werk
             platform: windows/amd64
             os: windows-latest
             label: windows-amd64
-            nsis: 'true'
+            nsis: "true"
     runs-on: ${{ matrix.build.os }}
     steps:
       - name: Checkout
@@ -40,9 +40,9 @@ jobs:
           build-platform: ${{ matrix.build.platform }}
           package: false
           nsis: ${{ matrix.build.nsis }}
-          go-version: '1.23'
-          node-version: '20.x'
-          wails-version: 'v2.11.0'
+          go-version: "1.23"
+          node-version: "20.x"
+          wails-version: "v2.11.0"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
