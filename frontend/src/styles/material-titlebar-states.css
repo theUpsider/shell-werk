@@ -1,4 +1,25 @@
-.titlebar-btn:hover{border-color:var(--md-primary);background:rgba(79,124,255,.18);color:var(--md-primary);}
-.titlebar-btn:focus-visible{outline:2px solid var(--md-primary);}
-.titlebar-btn.close{color:var(--md-danger);}
-.titlebar-btn.close:hover{background:var(--md-danger);color:var(--md-on-primary);}
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--md-outline);
+}
+.titlebar-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
+}
+.titlebar-btn.minimize:hover {
+  background: rgba(79, 124, 255, 0.22);
+  border-color: var(--md-primary);
+  color: var(--md-primary);
+  box-shadow: 0 10px 24px rgba(79, 124, 255, 0.22);
+}
+.titlebar-btn.maximize:hover {
+  background: rgba(243, 198, 35, 0.22);
+  border-color: var(--md-accent);
+  color: var(--md-on-primary);
+  box-shadow: 0 10px 24px rgba(243, 198, 35, 0.28);
+}
+.titlebar-btn.close:hover {
+  background: var(--md-danger);
+  border-color: var(--md-danger);
+  color: var(--md-on-primary);
+  box-shadow: 0 10px 24px rgba(255, 107, 107, 0.26);
+}

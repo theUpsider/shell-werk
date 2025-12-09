@@ -65,44 +65,25 @@ export function TitleBar() {
       <div className="titlebar-actions" aria-label="Window controls">
         <button
           type="button"
-          className="titlebar-btn"
+          className="titlebar-btn minimize"
           onClick={handleMinimise}
           onDoubleClick={(event) => event.stopPropagation()}
           aria-label="Minimize window"
-        >
-          <svg viewBox="0 0 12 12" aria-hidden focusable="false">
-            <path d="M2.5 6.5h7v1h-7z" />
-          </svg>
-        </button>
+        />
         <button
           type="button"
-          className="titlebar-btn"
+          className="titlebar-btn maximize"
           onClick={handleToggleMaximise}
           onDoubleClick={(event) => event.stopPropagation()}
           aria-label={isMaximized ? "Restore window" : "Maximize window"}
-        >
-          {isMaximized ? (
-            <svg viewBox="0 0 12 12" aria-hidden focusable="false">
-              <path d="M3 4h5v5H3z" />
-              <path d="M4 3h5v5h-1V4H4z" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 12 12" aria-hidden focusable="false">
-              <path d="M3 3h6v6H3z" />
-            </svg>
-          )}
-        </button>
+        />
         <button
           type="button"
           className="titlebar-btn close"
           onClick={handleQuit}
           onDoubleClick={(event) => event.stopPropagation()}
           aria-label="Exit shell-werk"
-        >
-          <svg viewBox="0 0 12 12" aria-hidden focusable="false">
-            <path d="M3 3l6 6M9 3 3 9" />
-          </svg>
-        </button>
+        />
       </div>
     </div>
   );

@@ -101,7 +101,6 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       ) : (
         <div className="empty-state">
           <p>Start by asking a question or describing a task.</p>
-          <p className="muted">Messages stay local and persist across restarts.</p>
         </div>
       )}
 
@@ -111,7 +110,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
           role="status"
           aria-label="Thinking indicator"
         >
-          <div className="thinking-icon" aria-hidden="true" data-testid="idea-bulb">
+          <div
+            className="thinking-icon"
+            aria-hidden="true"
+            data-testid="idea-bulb"
+          >
             <svg
               viewBox="0 0 24 24"
               fill="none"

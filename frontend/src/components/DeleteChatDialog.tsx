@@ -26,9 +26,6 @@ export const DeleteChatDialog: React.FC<DeleteChatDialogProps> = ({
       >
         <div className="modal-header">
           <h3 id="delete-dialog-title">Delete chat</h3>
-          <button className="ghost" onClick={onCancel}>
-            Cancel
-          </button>
         </div>
         <div className="modal-body">
           <p id="delete-dialog-description" className="warning-text">
