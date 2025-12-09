@@ -1,6 +1,5 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 import {
   Chat,
@@ -18,82 +17,30 @@ import {
   type SettingsState,
 } from "./settings";
 import { describeError, formatProviderTarget } from "./errors";
-import { ToolTraceMessage } from "./ToolTraceMessage";
+import { ChatFeed } from "./components/ChatFeed";
+import { ChatHeader } from "./components/ChatHeader";
+import { Composer } from "./components/Composer";
+import { DeleteChatDialog } from "./components/DeleteChatDialog";
+import { SettingsModal } from "./components/SettingsModal";
+import { Sidebar } from "./components/Sidebar";
+import type {
+  ChatMessage,
+  ChatResponsePayload,
+  ChatSession,
+  DialogueTrace,
+  FeedItem,
+  Role,
+  ThinkingState,
+  ToolCall,
+  ToolMetadata,
+} from "./types/chat";
 import "./App.css";
 import "./tool-calls.css";
-
-type Role = "user" | "assistant" | "tool";
-
-interface ToolCallFunction {
-  name: string;
-  arguments: string;
-}
-
-interface ToolCall {
-  id?: string;
-  type: string;
-  function: ToolCallFunction;
-}
-
-interface ChatMessage {
-  id: string;
-  role: Role;
-  content: string;
-  createdAt: string;
-  toolCalls?: ToolCall[];
-  isTrace?: boolean;
-  traceKind?: string;
-}
-
-interface ChatSession {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  messages: ChatMessage[];
-  toolChoices: Record<string, boolean>;
-}
-
-interface ChatResponsePayload {
-  message: { role: string; content: string; tool_calls?: ToolCall[] };
-  latencyMs: number;
-  trace?: DialogueTrace[];
-}
-
-interface DialogueTrace {
-  id: string;
-  role: string;
-  kind: string;
-  title?: string;
-  content: string;
-  status?: string;
-  createdAt?: string;
-}
-
-interface ToolMetadata {
-  id: string;
-  name: string;
-  description: string;
-  uiVisible: boolean;
-  enabled: boolean;
-}
-
-type FeedItem =
-  | { kind: "message"; message: ChatMessage }
-  | { kind: "trace-group"; id: string; traces: ChatMessage[] };
 
 const THINKING_START_EVENT = "thinking:start";
 const THINKING_UPDATE_EVENT = "thinking:update";
 const THINKING_END_EVENT = "thinking:end";
 const ANSWER_UPDATE_EVENT = "answer:update";
-
-const markdownComponents = {
-  a: ({ children, ...props }: React.ComponentProps<"a">) => (
-    <a {...props} target="_blank" rel="noreferrer">
-      {children ?? props.href}
-    </a>
-  ),
-};
 
 interface ThinkingEventPayload {
   sessionId: string;
@@ -104,15 +51,6 @@ interface AnswerEventPayload {
   sessionId: string;
   chunk: string;
 }
-
-const formatElapsed = (elapsedMs: number) => {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-};
 
 const STORAGE_KEY = "shellwerk:sessions";
 
@@ -149,54 +87,6 @@ const applyAssistantContent = (
     ),
     updatedAt: new Date().toISOString(),
   }));
-};
-
-interface TraceGroupProps {
-  traces: ChatMessage[];
-}
-
-const TraceGroup: React.FC<TraceGroupProps> = ({ traces }) => {
-  const [collapsed, setCollapsed] = useState(true);
-  const first = traces[0];
-  const title = `Tool calls (${traces.length})`;
-  const createdTime = first?.createdAt
-    ? new Date(first.createdAt).toLocaleTimeString()
-    : "";
-
-  return (
-    <div className="trace-group-card" data-collapsed={collapsed}>
-      <button
-        type="button"
-        className="trace-group-toggle"
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed((prev) => !prev)}
-      >
-        <div className="trace-group-meta">
-          <span className="trace-group-title">{title}</span>
-          {createdTime && (
-            <span className="trace-group-time" aria-label="Timestamp">
-              {createdTime}
-            </span>
-          )}
-        </div>
-        <span className="trace-group-chevron" aria-hidden="true">
-          {collapsed ? "▸" : "▾"}
-        </span>
-      </button>
-      {!collapsed && (
-        <div className="trace-group-body">
-          {traces.map((trace) => (
-            <ToolTraceMessage
-              key={trace.id}
-              content={trace.content}
-              kind={trace.traceKind}
-              initiallyCollapsed
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
 };
 
 function App() {
@@ -241,11 +131,7 @@ function App() {
     Record<string, boolean>
   >({});
   const [toolError, setToolError] = useState<string | null>(null);
-  const [isToolMenuOpen, setIsToolMenuOpen] = useState(false);
-  const [thinking, setThinking] = useState<{
-    sessionId: string;
-    startedAt: number;
-  } | null>(null);
+  const [thinking, setThinking] = useState<ThinkingState | null>(null);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const placeholderMap = useRef<
     Record<string, { id: string; content: string; token: string }>
@@ -415,12 +301,6 @@ function App() {
     activeSessionIdRef.current = activeSessionId;
     setThinkingStreamText(thinkingStreamsRef.current[activeSessionId] ?? "");
   }, [activeSessionId]);
-
-  useEffect(() => {
-    if (settings.chatOnly) {
-      setIsToolMenuOpen(false);
-    }
-  }, [settings.chatOnly]);
 
   useEffect(() => {
     if (!thinking) return;
@@ -928,7 +808,6 @@ function App() {
   const handleToggleTool = (toolId: string) => {
     if (settings.chatOnly) return;
     if (toolId === "web_search" && !webSearchReady) return;
-    setIsToolMenuOpen(false);
     setSessions((prev) =>
       prev.map((session) => {
         if (session.id !== activeSessionId) return session;
@@ -999,648 +878,83 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <h1>shell-werk</h1>
-          <p className="muted">Local LLM assistant</p>
-        </div>
-        <button className="primary" onClick={handleNewChat}>
-          New Chat
-        </button>
-        <nav className="session-list" aria-label="Past chats">
-          {sessions.map((session) => {
-            const isActive = session.id === activeSession?.id;
-            return (
-              <div
-                key={session.id}
-                className={`session-row ${isActive ? "active" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="session-item"
-                  onClick={() => handleSelectSession(session.id)}
-                >
-                  <span className="session-title">
-                    {session.title || "New Chat"}
-                  </span>
-                  <span className="session-meta">
-                    {new Date(session.updatedAt).toLocaleString()}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="session-delete"
-                  onClick={(event) =>
-                    handleRequestDeleteSession(session.id, event)
-                  }
-                  aria-label={`Delete chat ${session.title || "chat"}`}
-                >
-                  <span aria-hidden="true">x</span>
-                </button>
-              </div>
-            );
-          })}
-        </nav>
-        <button className="ghost" onClick={() => setShowSettings(true)}>
-          Settings
-        </button>
-      </aside>
+      <Sidebar
+        sessions={sessions}
+        activeSessionId={activeSession?.id}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+        onOpenSettings={() => setShowSettings(true)}
+        onRequestDeleteSession={handleRequestDeleteSession}
+      />
 
       <main className="chat-pane">
-        <div className="chat-header">
-          <div>
-            <p className="label">Active chat</p>
-            <h2>{activeSession?.title || "New Chat"}</h2>
-          </div>
-          <div className="chip-row">
-            <div className="chip">
-              Config: {activeConfig?.name || "No config"} ·{" "}
-              {activeConfig?.provider || "unset"}
-            </div>
-            <div className={`chip ${isSending ? "chip-warn" : "chip-ghost"}`}>
-              {isSending
-                ? "Sending..."
-                : lastLatencyMs
-                ? `Last response: ${lastLatencyMs} ms`
-                : "Idle"}
-            </div>
-          </div>
-        </div>
+        <ChatHeader
+          title={activeSession?.title || "New Chat"}
+          configName={activeConfig?.name}
+          provider={activeConfig?.provider}
+          isSending={isSending}
+          lastLatencyMs={lastLatencyMs}
+        />
 
-        <div className="chat-feed" ref={chatScrollRef}>
-          {feedItems.length ? (
-            feedItems.map((item) => {
-              if (item.kind === "trace-group") {
-                return <TraceGroup key={item.id} traces={item.traces} />;
-              }
+        <ChatFeed
+          items={feedItems}
+          thinking={thinking}
+          thinkingElapsed={thinkingElapsed}
+          thinkingStreamText={thinkingStreamText}
+          chatScrollRef={chatScrollRef}
+          activeSessionId={activeSession?.id}
+          onRunTool={handleRunTool}
+        />
 
-              const message = item.message;
-
-              // Try to parse JSON content for assistant messages if it looks like a tool result
-              let displayContent = message.content;
-              if (
-                message.role === "assistant" &&
-                displayContent.trim().startsWith("{")
-              ) {
-                try {
-                  const parsed = JSON.parse(displayContent);
-                  if (parsed.summary) {
-                    displayContent = parsed.summary;
-                  }
-                } catch {
-                  // ignore
-                }
-              }
-
-              return (
-                <div
-                  key={message.id}
-                  className={`message message-${message.role}`}
-                >
-                  <div className="message-meta">
-                    <span className="role-label">{message.role}</span>
-                    <span className="time">
-                      {new Date(message.createdAt).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <div className="message-body">
-                    <ReactMarkdown skipHtml components={markdownComponents}>
-                      {displayContent}
-                    </ReactMarkdown>
-                    {message.toolCalls && message.toolCalls.length > 0 && (
-                      <div className="tool-calls">
-                        {message.toolCalls.map((tc, idx) => (
-                          <div key={idx} className="tool-call-card">
-                            <div className="tool-call-header">
-                              Tool Request: {tc.function.name}
-                            </div>
-                            <pre className="tool-call-args">
-                              {tc.function.arguments}
-                            </pre>
-                            <button onClick={() => handleRunTool(tc)}>
-                              Run Command
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="empty-state">
-              <p>Start by asking a question or describing a task.</p>
-              <p className="muted">
-                Messages stay local and persist across restarts.
-              </p>
-            </div>
-          )}
-
-          {thinking?.sessionId === activeSession?.id && (
-            <div
-              className="message thinking message-assistant"
-              role="status"
-              aria-label="Thinking indicator"
-            >
-              <div
-                className="thinking-icon"
-                aria-hidden="true"
-                data-testid="idea-bulb"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  role="img"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M12 2.5c-3 0-5.5 2.43-5.5 5.42 0 1.95 1.08 3.63 2.62 4.57l.38.23v2.13c0 .36.29.65.65.65h3.9c.36 0 .65-.29.65-.65v-2.13l.38-.23c1.54-.94 2.62-2.62 2.62-4.57C17.5 4.93 15 2.5 12 2.5Z"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                  />
-                  <path
-                    d="M10 19.75h4M10.5 22h3"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M9.75 15h4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-              <div className="thinking-copy">
-                <div className="thinking-row">
-                  <span className="thinking-label">Thinking</span>
-                  <span className="thinking-timer" data-testid="thinking-timer">
-                    {formatElapsed(thinkingElapsed)}
-                  </span>
-                </div>
-                <p className="thinking-hint">
-                  The assistant is working on your request.
-                </p>
-                {thinkingStreamText && (
-                  <p className="thinking-stream" aria-live="polite">
-                    {thinkingStreamText}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="composer" aria-label="Chat input">
-          <div className="composer-box">
-            <div className="tool-pill-row" aria-label="Tool toggles">
-              {enabledVisibleTools.map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  className="tool-pill"
-                  onClick={() => handleToggleTool(tool.id)}
-                  title={tool.description}
-                  aria-label={`Disable ${tool.name}`}
-                  disabled={
-                    settings.chatOnly ||
-                    (tool.id === "web_search" && !webSearchReady)
-                  }
-                >
-                  <span className="pill-label">{tool.name}</span>
-                  <span aria-hidden="true" className="pill-close">
-                    x
-                  </span>
-                </button>
-              ))}
-              <div className="tool-add-wrapper">
-                <button
-                  type="button"
-                  className="tool-add"
-                  aria-label="Add tools"
-                  aria-expanded={isToolMenuOpen}
-                  onClick={() => setIsToolMenuOpen((open) => !open)}
-                  disabled={settings.chatOnly}
-                >
-                  +
-                </button>
-                {isToolMenuOpen && (
-                  <div className="tool-menu" role="menu">
-                    {disabledVisibleTools.length ? (
-                      disabledVisibleTools.map((tool) => (
-                        <button
-                          key={tool.id}
-                          type="button"
-                          role="menuitem"
-                          onClick={() => handleToggleTool(tool.id)}
-                          disabled={
-                            settings.chatOnly ||
-                            (tool.id === "web_search" && !webSearchReady)
-                          }
-                        >
-                          Enable {tool.name}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="tool-menu-empty">All tools enabled</span>
-                    )}
-                  </div>
-                )}
-              </div>
-              {toolError && <span className="error-text">{toolError}</span>}
-              {missingWebSearchKey && (
-                <span className="error-text">
-                  Add your Brave Search API key in Settings to enable Web
-                  Search.
-                </span>
-              )}
-            </div>
-            <div className="composer-input-row">
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={handleEnterKey}
-                placeholder="Ask shell werk what to do..."
-                rows={3}
-              />
-              <button
-                className={`send-button ${isActiveSending ? "cancel" : ""}`}
-                onClick={isActiveSending ? handleCancelSend : handleSend}
-                disabled={!isActiveSending && !draft.trim()}
-                aria-label={isActiveSending ? "Cancel generation" : "Send"}
-              >
-                {isActiveSending ? (
-                  <span className="send-button-inner">
-                    <span className="cancel-icon" aria-hidden="true">
-                      <svg
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M6 6l12 12M18 6L6 18"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </span>
-                    <span className="send-button-label">Cancel</span>
-                  </span>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M4.5 12L5.5 11L17 5.5C17.6 5.2 18.3 5.8 18 6.4L13.5 18.5C13.2 19.1 12.3 19.1 12 18.5L10.2 14.6C10 14.2 10.3 13.7 10.8 13.7H17"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <Composer
+          draft={draft}
+          onDraftChange={setDraft}
+          onEnterKey={handleEnterKey}
+          onSend={handleSend}
+          onCancel={handleCancelSend}
+          isActiveSending={isActiveSending}
+          enabledVisibleTools={enabledVisibleTools}
+          disabledVisibleTools={disabledVisibleTools}
+          toolError={toolError}
+          missingWebSearchKey={missingWebSearchKey}
+          chatOnly={settings.chatOnly}
+          webSearchReady={webSearchReady}
+          onToggleTool={handleToggleTool}
+        />
       </main>
 
       {showSettings && (
-        <div className="modal-backdrop">
-          <dialog
-            className="modal"
-            open
-            aria-modal="true"
-            aria-labelledby="settings-title"
-          >
-            <div className="modal-header">
-              <h3 id="settings-title">Model settings</h3>
-              <button className="ghost" onClick={() => setShowSettings(false)}>
-                Close
-              </button>
-            </div>
-            <form className="modal-body" onSubmit={handleSettingsSubmit}>
-              <div className="modal-section">
-                <div className="config-header-row">
-                  <div>
-                    <p className="section-title">Model configurations</p>
-                    <p className="section-hint">
-                      Create cards for each provider + endpoint + model combo
-                      and pick one as the active chat target.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={handleAddConfig}
-                  >
-                    Add configuration
-                  </button>
-                </div>
-                <div
-                  className="config-card-list"
-                  role="list"
-                  aria-label="Model configurations"
-                >
-                  {settings.configs.map((config, index) => {
-                    const models = modelsByConfig[config.id] ?? [];
-                    const modelError = modelErrors[config.id];
-                    const loading = isLoadingModels[config.id] ?? false;
-                    const isActive = config.id === settings.activeConfigId;
-                    return (
-                      <div
-                        key={config.id}
-                        className={`config-card ${isActive ? "active" : ""}`}
-                        role="listitem"
-                      >
-                        <div className="config-card-top">
-                          <label>
-                            <span className="label-text">Name</span>
-                            <input
-                              type="text"
-                              value={config.name}
-                              placeholder={`Config ${index + 1}`}
-                              onChange={(e) =>
-                                handleConfigChange(
-                                  config.id,
-                                  "name",
-                                  e.target.value
-                                )
-                              }
-                            />
-                          </label>
-                          <div className="config-card-actions">
-                            <label className="inline-toggle">
-                              <input
-                                type="radio"
-                                name="active-config"
-                                checked={isActive}
-                                onChange={() => handleSelectConfig(config.id)}
-                              />
-                              <span>Active</span>
-                            </label>
-                            <button
-                              type="button"
-                              className="ghost"
-                              onClick={() => handleDeleteConfig(config.id)}
-                              disabled={settings.configs.length <= 1}
-                              aria-label={`Delete ${
-                                config.name || `config ${index + 1}`
-                              }`}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                        <div className="config-grid">
-                          <label>
-                            <span className="label-text">Provider</span>
-                            <select
-                              value={config.provider}
-                              onChange={(e) =>
-                                handleConfigChange(
-                                  config.id,
-                                  "provider",
-                                  e.target.value
-                                )
-                              }
-                            >
-                              <option value="ollama">Ollama</option>
-                              <option value="vllm">vLLM</option>
-                              <option value="mock">Mock</option>
-                            </select>
-                          </label>
-                          <label>
-                            <span className="label-text">Endpoint</span>
-                            <input
-                              type="text"
-                              value={config.endpoint}
-                              onChange={(e) =>
-                                handleConfigChange(
-                                  config.id,
-                                  "endpoint",
-                                  e.target.value
-                                )
-                              }
-                              placeholder="http://localhost:11434"
-                            />
-                          </label>
-                          <label>
-                            <span className="label-text">API key (Bearer)</span>
-                            <input
-                              type="password"
-                              value={config.apiKey}
-                              onChange={(e) =>
-                                handleConfigChange(
-                                  config.id,
-                                  "apiKey",
-                                  e.target.value
-                                )
-                              }
-                              placeholder="sk-..."
-                              autoComplete="off"
-                            />
-                          </label>
-                          <label>
-                            <span className="label-text">Model</span>
-                            {models.length ? (
-                              <select
-                                value={config.model}
-                                onChange={(e) =>
-                                  handleConfigChange(
-                                    config.id,
-                                    "model",
-                                    e.target.value
-                                  )
-                                }
-                              >
-                                {models.map((model) => (
-                                  <option key={model} value={model}>
-                                    {model}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <input
-                                type="text"
-                                value={config.model}
-                                onChange={(e) =>
-                                  handleConfigChange(
-                                    config.id,
-                                    "model",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder="qwen-3"
-                              />
-                            )}
-                          </label>
-                        </div>
-                        <div className="inline-actions config-card-footer">
-                          <button
-                            type="button"
-                            className="ghost"
-                            onClick={() => handleLoadModels(config.id)}
-                            disabled={loading}
-                          >
-                            {loading ? "Loading models..." : "Load models"}
-                          </button>
-                          {modelError && (
-                            <span className="error-text">{modelError}</span>
-                          )}
-                          {!modelError && models.length > 0 && (
-                            <span className="muted">
-                              {models.length} models available
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="modal-section">
-                <p className="section-title">Conversation defaults</p>
-                <p className="section-hint">
-                  Apply global chat behaviors before sending messages.
-                </p>
-                <label className="inline-toggle">
-                  <input
-                    type="checkbox"
-                    checked={settings.chatOnly}
-                    onChange={(e) => handleToggleChatOnly(e.target.checked)}
-                  />
-                  <span>Chat Only mode (disable tools)</span>
-                </label>
-              </div>
-              {visibleTools.some((tool) => tool.id === "web_search") && (
-                <div className="modal-section">
-                  <p className="section-title">Web search</p>
-                  <p className="section-hint">
-                    Uses Brave Search. Add your API key to enable this tool.
-                  </p>
-                  <label>
-                    <span className="label-text">Brave API key</span>
-                    <input
-                      type="password"
-                      value={settings.webSearchApiKey}
-                      onChange={(e) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          webSearchApiKey: e.target.value,
-                        }))
-                      }
-                      placeholder="X-Subscription-Token"
-                      autoComplete="off"
-                    />
-                  </label>
-                  {!webSearchReady && (
-                    <p className="muted">
-                      Web Search stays disabled until a valid key is provided.
-                    </p>
-                  )}
-                </div>
-              )}
-              {toolCatalog.some((tool) => !tool.uiVisible) && (
-                <div className="modal-section">
-                  <p className="section-title">Hidden tools</p>
-                  <p className="section-hint">
-                    Toggle global availability for tools that are not shown in
-                    the chat UI.
-                  </p>
-                  <div className="hidden-tools" aria-label="Hidden tools">
-                    <div className="hidden-tool-grid">
-                      {toolCatalog
-                        .filter((tool) => !tool.uiVisible)
-                        .map((tool) => {
-                          const enabled = !hiddenDisabled.has(tool.id);
-                          return (
-                            <label key={tool.id} className="inline-toggle">
-                              <input
-                                type="checkbox"
-                                checked={enabled}
-                                onChange={() => handleToggleHiddenTool(tool.id)}
-                              />
-                              <span>
-                                {tool.name} (hidden tool)
-                                <span className="muted">
-                                  {" "}
-                                  — {tool.description}
-                                </span>
-                              </span>
-                            </label>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => setShowSettings(false)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="primary">
-                  Save
-                </button>
-              </div>
-            </form>
-          </dialog>
-        </div>
+        <SettingsModal
+          settings={settings}
+          visibleTools={visibleTools}
+          toolCatalog={toolCatalog}
+          hiddenDisabled={hiddenDisabled}
+          webSearchReady={webSearchReady}
+          modelErrors={modelErrors}
+          modelsByConfig={modelsByConfig}
+          isLoadingModels={isLoadingModels}
+          onClose={() => setShowSettings(false)}
+          onSubmit={handleSettingsSubmit}
+          onAddConfig={handleAddConfig}
+          onSelectConfig={handleSelectConfig}
+          onDeleteConfig={handleDeleteConfig}
+          onConfigChange={handleConfigChange}
+          onLoadModels={handleLoadModels}
+          onToggleChatOnly={handleToggleChatOnly}
+          onToggleHiddenTool={handleToggleHiddenTool}
+          onChangeWebSearchKey={(value) =>
+            setSettings((prev) => ({ ...prev, webSearchApiKey: value }))
+          }
+        />
       )}
 
       {pendingDeletionSession && (
-        <div className="modal-backdrop">
-          <dialog
-            className="modal delete-modal"
-            open
-            aria-modal="true"
-            role="dialog"
-            aria-labelledby="delete-dialog-title"
-            aria-describedby="delete-dialog-description"
-            onKeyDown={handleDeleteDialogKeyDown}
-          >
-            <div className="modal-header">
-              <h3 id="delete-dialog-title">Delete chat</h3>
-              <button className="ghost" onClick={handleCancelDelete}>
-                Cancel
-              </button>
-            </div>
-            <div className="modal-body">
-              <p id="delete-dialog-description" className="warning-text">
-                Deleting{" "}
-                <strong>{pendingDeletionSession.title || "this chat"}</strong>{" "}
-                is permanent and cannot be undone.
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="ghost"
-                onClick={handleCancelDelete}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="primary destructive"
-                onClick={handleConfirmDelete}
-              >
-                Delete
-              </button>
-            </div>
-          </dialog>
-        </div>
+        <DeleteChatDialog
+          sessionTitle={pendingDeletionSession.title || "this chat"}
+          onCancel={handleCancelDelete}
+          onConfirm={handleConfirmDelete}
+          onKeyDown={handleDeleteDialogKeyDown}
+        />
       )}
     </div>
   );
