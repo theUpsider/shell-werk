@@ -1,3 +1,4 @@
-.titlebar-btn:hover{border-color:var(--md-primary);color:var(--md-primary);}
+.titlebar-btn:hover{border-color:var(--md-primary);background:rgba(79,124,255,.18);color:var(--md-primary);}
+.titlebar-btn:focus-visible{outline:2px solid var(--md-primary);}
 .titlebar-btn.close{color:var(--md-danger);}
 .titlebar-btn.close:hover{background:var(--md-danger);color:var(--md-on-primary);}

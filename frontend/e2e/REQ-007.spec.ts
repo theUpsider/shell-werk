@@ -14,7 +14,7 @@ const acceptanceTests: AcceptanceTest[] = [
     run: async ({ page }) => {
       await page.goto("/");
       await expect(
-        page.getByRole("heading", { name: "shell-werk" })
+        page.getByRole("button", { name: "New Chat", exact: true })
       ).toBeVisible();
     },
   },

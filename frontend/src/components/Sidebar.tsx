@@ -23,10 +23,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <h1>shell-werk</h1>
-        <p className="muted">Local LLM assistant</p>
-      </div>
       <button className="primary" onClick={onNewChat}>
         New Chat
       </button>
