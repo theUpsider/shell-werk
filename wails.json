@@ -6,6 +6,10 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "frameless": true,
+  "windows": {
+    "disableFramelessWindowDecorations": true
+  },
   "author": {
     "name": "theUpsider",
     "email": "davidvfischer@gmail.com"

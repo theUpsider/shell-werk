@@ -23,6 +23,7 @@ import { Composer } from "./components/Composer";
 import { DeleteChatDialog } from "./components/DeleteChatDialog";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
+import { TitleBar } from "./components/TitleBar";
 import type {
   ChatMessage,
   ChatResponsePayload,
@@ -877,50 +878,54 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        sessions={sessions}
-        activeSessionId={activeSession?.id}
-        onSelectSession={handleSelectSession}
-        onNewChat={handleNewChat}
-        onOpenSettings={() => setShowSettings(true)}
-        onRequestDeleteSession={handleRequestDeleteSession}
-      />
+    <div className="window-shell">
+      <TitleBar />
 
-      <main className="chat-pane">
-        <ChatHeader
-          title={activeSession?.title || "New Chat"}
-          configName={activeConfig?.name}
-          provider={activeConfig?.provider}
-          isSending={isSending}
-          lastLatencyMs={lastLatencyMs}
-        />
-
-        <ChatFeed
-          items={feedItems}
-          thinking={thinking}
-          thinkingElapsed={thinkingElapsed}
-          thinkingStreamText={thinkingStreamText}
-          chatScrollRef={chatScrollRef}
+      <div className="app-shell">
+        <Sidebar
+          sessions={sessions}
           activeSessionId={activeSession?.id}
-          onRunTool={handleRunTool}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
+          onOpenSettings={() => setShowSettings(true)}
+          onRequestDeleteSession={handleRequestDeleteSession}
         />
 
-        <Composer
-          draft={draft}
-          onDraftChange={setDraft}
-          onEnterKey={handleEnterKey}
-          onSend={handleSend}
-          onCancel={handleCancelSend}
-          isActiveSending={isActiveSending}
-          enabledVisibleTools={enabledVisibleTools}
-          disabledVisibleTools={disabledVisibleTools}
-          toolError={toolError}
-          chatOnly={settings.chatOnly}
-          webSearchReady={webSearchReady}
-          onToggleTool={handleToggleTool}
-        />
-      </main>
+        <main className="chat-pane">
+          <ChatHeader
+            title={activeSession?.title || "New Chat"}
+            configName={activeConfig?.name}
+            provider={activeConfig?.provider}
+            isSending={isSending}
+            lastLatencyMs={lastLatencyMs}
+          />
+
+          <ChatFeed
+            items={feedItems}
+            thinking={thinking}
+            thinkingElapsed={thinkingElapsed}
+            thinkingStreamText={thinkingStreamText}
+            chatScrollRef={chatScrollRef}
+            activeSessionId={activeSession?.id}
+            onRunTool={handleRunTool}
+          />
+
+          <Composer
+            draft={draft}
+            onDraftChange={setDraft}
+            onEnterKey={handleEnterKey}
+            onSend={handleSend}
+            onCancel={handleCancelSend}
+            isActiveSending={isActiveSending}
+            enabledVisibleTools={enabledVisibleTools}
+            disabledVisibleTools={disabledVisibleTools}
+            toolError={toolError}
+            chatOnly={settings.chatOnly}
+            webSearchReady={webSearchReady}
+            onToggleTool={handleToggleTool}
+          />
+        </main>
+      </div>
 
       {showSettings && (
         <SettingsModal
