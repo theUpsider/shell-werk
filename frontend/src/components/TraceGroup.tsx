@@ -41,6 +41,8 @@ export const TraceGroup: React.FC<TraceGroupProps> = ({ traces }) => {
               key={trace.id}
               content={trace.content}
               kind={trace.traceKind}
+              title={trace.traceTitle}
+              status={trace.traceStatus}
               initiallyCollapsed
             />
           ))}

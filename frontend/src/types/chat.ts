@@ -19,6 +19,8 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   isTrace?: boolean;
   traceKind?: string;
+  traceTitle?: string;
+  traceStatus?: string;
 }
 
 export interface ChatSession {

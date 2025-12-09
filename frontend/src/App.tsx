@@ -554,6 +554,8 @@ function App() {
             createdAt,
             isTrace: true,
             traceKind: step.kind,
+            traceTitle: step.title,
+            traceStatus: step.status,
           } satisfies ChatMessage;
         });
 
@@ -910,14 +912,14 @@ function App() {
           onEnterKey={handleEnterKey}
           onSend={handleSend}
           onCancel={handleCancelSend}
-            isActiveSending={isActiveSending}
-            enabledVisibleTools={enabledVisibleTools}
-            disabledVisibleTools={disabledVisibleTools}
-            toolError={toolError}
-            chatOnly={settings.chatOnly}
-            webSearchReady={webSearchReady}
-            onToggleTool={handleToggleTool}
-          />
+          isActiveSending={isActiveSending}
+          enabledVisibleTools={enabledVisibleTools}
+          disabledVisibleTools={disabledVisibleTools}
+          toolError={toolError}
+          chatOnly={settings.chatOnly}
+          webSearchReady={webSearchReady}
+          onToggleTool={handleToggleTool}
+        />
       </main>
 
       {showSettings && (
