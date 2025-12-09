@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"shell-werk/internal/llm"
@@ -13,16 +14,24 @@ import (
 
 // App struct
 type App struct {
-	ctx      context.Context
-	tools    *tools.ToolRegistry
-	streamer *llm.Streamer
-	events   *appEventSink
+	ctx            context.Context
+	tools          *tools.ToolRegistry
+	streamer       *llm.Streamer
+	events         *appEventSink
+	cancelMu       sync.Mutex
+	cancelSessions map[string]cancelEntry
+}
+
+type cancelEntry struct {
+	cancel context.CancelFunc
+	token  string
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	app := &App{
-		tools: tools.NewToolRegistry(tools.DefaultTools()),
+		tools:          tools.NewToolRegistry(tools.DefaultTools()),
+		cancelSessions: map[string]cancelEntry{},
 	}
 	app.events = &appEventSink{app: app}
 	app.streamer = llm.NewStreamer(app.events)
@@ -49,6 +58,10 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 		ctx = context.Background()
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	token := a.trackSessionCancel(req.SessionID, cancel)
+	defer a.releaseSessionCancel(req.SessionID, token, cancel)
+
 	req.History = llm.ConversationFromRequest(req)
 	req.Message = ""
 
@@ -72,8 +85,8 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 		}, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
+	ctx, timeoutCancel := context.WithTimeout(ctx, 120*time.Second)
+	defer timeoutCancel()
 
 	loop := llm.NewDialogueLoop(req, a.events)
 	msg, trace, err := loop.Run(ctx, req)
@@ -82,6 +95,60 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 		LatencyMs: time.Since(start).Milliseconds(),
 		Trace:     trace,
 	}, wrapProviderError(req.Provider, req.Endpoint, err)
+}
+
+// CancelChat cancels an in-flight chat session if one exists.
+func (a *App) CancelChat(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+
+	a.cancelMu.Lock()
+	entry, ok := a.cancelSessions[sessionID]
+	if ok {
+		delete(a.cancelSessions, sessionID)
+	}
+	a.cancelMu.Unlock()
+
+	if !ok || entry.cancel == nil {
+		return false
+	}
+
+	entry.cancel()
+	return true
+}
+
+func (a *App) trackSessionCancel(sessionID string, cancel context.CancelFunc) string {
+	if cancel == nil || strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	token := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	a.cancelMu.Lock()
+	if a.cancelSessions == nil {
+		a.cancelSessions = map[string]cancelEntry{}
+	}
+	a.cancelSessions[sessionID] = cancelEntry{cancel: cancel, token: token}
+	a.cancelMu.Unlock()
+
+	return token
+}
+
+func (a *App) releaseSessionCancel(sessionID, token string, cancel context.CancelFunc) {
+	if cancel != nil {
+		cancel()
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	a.cancelMu.Lock()
+	entry, ok := a.cancelSessions[sessionID]
+	if ok && entry.token == token {
+		delete(a.cancelSessions, sessionID)
+	}
+	a.cancelMu.Unlock()
 }
 
 // Models returns the provider's available models for the configured endpoint.

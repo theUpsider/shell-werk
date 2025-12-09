@@ -3,6 +3,8 @@
 import {llm} from '../models';
 import {tools} from '../models';
 
+export function CancelChat(arg1:string):Promise<boolean>;
+
 export function Chat(arg1:llm.ChatRequest):Promise<llm.ChatResponse>;
 
 export function GetTools():Promise<Array<tools.ToolMetadata>>;

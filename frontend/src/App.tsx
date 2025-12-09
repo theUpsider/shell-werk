@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 import {
   Chat,
+  CancelChat,
   GetTools,
   Models,
   RunShellCommand,
@@ -226,7 +227,9 @@ function App() {
   const [settings, setSettings] = useState<SettingsState>(() =>
     loadSettings(globalThis.localStorage)
   );
-  const [isSending, setIsSending] = useState(false);
+  const [inFlightSessionId, setInFlightSessionId] = useState<string | null>(
+    null
+  );
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   const [modelsByConfig, setModelsByConfig] = useState<
     Record<string, string[]>
@@ -245,8 +248,10 @@ function App() {
   } | null>(null);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const placeholderMap = useRef<
-    Record<string, { id: string; content: string }>
+    Record<string, { id: string; content: string; token: string }>
   >({});
+  const requestTokensRef = useRef<Record<string, string>>({});
+  const canceledRequestsRef = useRef<Set<string>>(new Set());
   const thinkingStreamsRef = useRef<Record<string, string>>({});
   const activeSessionIdRef = useRef(activeSessionId);
   const [thinkingStreamText, setThinkingStreamText] = useState("");
@@ -284,6 +289,9 @@ function App() {
     flush();
     return items;
   }, [activeSession?.messages]);
+
+  const isSending = inFlightSessionId !== null;
+  const isActiveSending = isSending && inFlightSessionId === activeSession?.id;
 
   const hiddenDisabled = useMemo(
     () => new Set(settings.hiddenToolsDisabled ?? []),
@@ -463,7 +471,13 @@ function App() {
       EventsOn(ANSWER_UPDATE_EVENT, (payload: AnswerEventPayload) => {
         if (!payload?.sessionId || !payload.chunk) return;
         const placeholder = placeholderMap.current[payload.sessionId];
-        if (!placeholder) return;
+        const activeToken = requestTokensRef.current[payload.sessionId];
+        if (
+          !placeholder ||
+          placeholder.token !== activeToken ||
+          (activeToken && canceledRequestsRef.current.has(activeToken))
+        )
+          return;
         placeholder.content += payload.chunk;
         applyAssistantContent(
           payload.sessionId,
@@ -483,6 +497,13 @@ function App() {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [thinking, activeSession?.id]);
+
+  useEffect(() => {
+    if (!thinking || thinking.sessionId !== activeSession?.id) return;
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [thinkingStreamText, thinkingElapsed, activeSession?.id]);
 
   const updateSession = (
     sessionId: string,
@@ -551,12 +572,13 @@ function App() {
 
   const handleSend = () => {
     const text = draft.trim();
-    if (!text || !activeSession || isSending) return;
+    if (!text || !activeSession || inFlightSessionId) return;
     if (!activeConfig) {
       alert("Add a model configuration before sending a message.");
       return;
     }
     const sessionId = activeSession.id;
+    const requestToken = createId();
 
     const selectedTools = settings.chatOnly
       ? []
@@ -607,9 +629,12 @@ function App() {
     placeholderMap.current[sessionId] = {
       id: assistantPlaceholder.id,
       content: "",
+      token: requestToken,
     };
+    requestTokensRef.current[sessionId] = requestToken;
+    canceledRequestsRef.current.delete(requestToken);
     setDraft("");
-    setIsSending(true);
+    setInFlightSessionId(sessionId);
     setThinking({ sessionId, startedAt: Date.now() });
     const payload = llm.ChatRequest.createFrom({
       sessionId: activeSession.id,
@@ -634,6 +659,9 @@ function App() {
 
     Chat(payload)
       .then((response: ChatResponsePayload) => {
+        const activeToken = requestTokensRef.current[sessionId];
+        if (activeToken !== requestToken) return;
+        if (canceledRequestsRef.current.has(requestToken)) return;
         const traceMessages = (response.trace ?? []).map((step) => {
           const createdAt = step.createdAt ?? new Date().toISOString();
           const role: Role = step.role === "tool" ? "tool" : "assistant";
@@ -651,7 +679,7 @@ function App() {
           } satisfies ChatMessage;
         });
 
-        updateSession(activeSession.id, (session) => {
+        updateSession(sessionId, (session) => {
           const now = new Date().toISOString();
           const withoutPlaceholder = session.messages.filter(
             (msg) => msg.id !== assistantPlaceholder.id
@@ -674,6 +702,9 @@ function App() {
         setLastLatencyMs(response.latencyMs ?? null);
       })
       .catch((err: unknown) => {
+        const activeToken = requestTokensRef.current[sessionId];
+        if (activeToken !== requestToken) return;
+        if (canceledRequestsRef.current.has(requestToken)) return;
         const errorText = describeError(err);
         const providerHint = formatProviderTarget(
           activeConfig?.provider,
@@ -691,13 +722,50 @@ function App() {
         setLastLatencyMs(null);
       })
       .finally(() => {
-        setIsSending(false);
-        setThinking(null);
+        const activeToken = requestTokensRef.current[sessionId];
+        if (activeToken !== requestToken) return;
+        canceledRequestsRef.current.delete(requestToken);
+        setInFlightSessionId((current) =>
+          current === sessionId ? null : current
+        );
+        setThinking((currentThinking) =>
+          currentThinking?.sessionId === sessionId ? null : currentThinking
+        );
         delete placeholderMap.current[sessionId];
+        delete requestTokensRef.current[sessionId];
         if (activeSessionIdRef.current === sessionId) {
           setThinkingStreamText("");
         }
       });
+  };
+
+  const handleCancelSend = () => {
+    const sessionId = inFlightSessionId;
+    if (!sessionId) return;
+    const activeToken = requestTokensRef.current[sessionId];
+    if (activeToken) {
+      canceledRequestsRef.current.add(activeToken);
+    }
+    const placeholder = placeholderMap.current[sessionId];
+    if (placeholder && placeholder.token === activeToken) {
+      applyAssistantContent(
+        sessionId,
+        placeholder.id,
+        "Request canceled",
+        updateSession
+      );
+    }
+    setLastLatencyMs(null);
+    setInFlightSessionId((current) => (current === sessionId ? null : current));
+    setThinking((currentThinking) =>
+      currentThinking?.sessionId === sessionId ? null : currentThinking
+    );
+    if (activeSessionIdRef.current === sessionId) {
+      setThinkingStreamText("");
+    }
+    CancelChat(sessionId).catch((err) => {
+      console.error("[Chat] Failed to cancel session", err);
+    });
   };
 
   const handleEnterKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1199,25 +1267,45 @@ function App() {
                 rows={3}
               />
               <button
-                className="send-button"
-                onClick={handleSend}
-                disabled={!draft.trim()}
-                aria-label="Send"
+                className={`send-button ${isActiveSending ? "cancel" : ""}`}
+                onClick={isActiveSending ? handleCancelSend : handleSend}
+                disabled={!isActiveSending && !draft.trim()}
+                aria-label={isActiveSending ? "Cancel generation" : "Send"}
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M4.5 12L5.5 11L17 5.5C17.6 5.2 18.3 5.8 18 6.4L13.5 18.5C13.2 19.1 12.3 19.1 12 18.5L10.2 14.6C10 14.2 10.3 13.7 10.8 13.7H17"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                {isActiveSending ? (
+                  <span className="send-button-inner">
+                    <span className="cancel-icon" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M6 6l12 12M18 6L6 18"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span className="send-button-label">Cancel</span>
+                  </span>
+                ) : (
+                  <svg
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M4.5 12L5.5 11L17 5.5C17.6 5.2 18.3 5.8 18 6.4L13.5 18.5C13.2 19.1 12.3 19.1 12 18.5L10.2 14.6C10 14.2 10.3 13.7 10.8 13.7H17"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
               </button>
             </div>
           </div>
