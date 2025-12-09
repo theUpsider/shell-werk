@@ -16,8 +16,18 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - { name: shell-werk, platform: linux/amd64,   os: ubuntu-latest, label: linux-amd64 }
-          - { name: shell-werk, platform: windows/amd64, os: windows-latest, label: windows-amd64 }
+          - {
+              name: shell-werk,
+              platform: linux/amd64,
+              os: ubuntu-latest,
+              label: linux-amd64,
+            }
+          - {
+              name: shell-werk,
+              platform: windows/amd64,
+              os: windows-latest,
+              label: windows-amd64,
+            }
     runs-on: ${{ matrix.build.os }}
     steps:
       - name: Checkout
