@@ -5,3 +5,7 @@
 @import "./styles/material-stack-chat.css";
 @import "./styles/material-stack-composer.css";
 @import "./styles/material-stack-modal.css";
+
+.app-shell {
+  grid-template-columns: 320px 1fr;
+}

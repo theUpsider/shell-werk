@@ -37,7 +37,11 @@ export const DeleteChatDialog: React.FC<DeleteChatDialogProps> = ({
           <button type="button" className="ghost" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="primary destructive" onClick={onConfirm}>
+          <button
+            type="button"
+            className="primary destructive"
+            onClick={onConfirm}
+          >
             Delete
           </button>
         </div>
