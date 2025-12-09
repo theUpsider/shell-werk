@@ -16,18 +16,16 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - {
-              name: shell-werk,
-              platform: linux/amd64,
-              os: ubuntu-latest,
-              label: linux-amd64,
-            }
-          - {
-              name: shell-werk,
-              platform: windows/amd64,
-              os: windows-latest,
-              label: windows-amd64,
-            }
+          - name: shell-werk
+            platform: linux/amd64
+            os: ubuntu-latest
+            label: linux-amd64
+            nsis: 'false'
+          - name: shell-werk
+            platform: windows/amd64
+            os: windows-latest
+            label: windows-amd64
+            nsis: 'true'
     runs-on: ${{ matrix.build.os }}
     steps:
       - name: Checkout
@@ -41,6 +39,10 @@ jobs:
           build-name: ${{ matrix.build.name }}
           build-platform: ${{ matrix.build.platform }}
           package: false
+          nsis: ${{ matrix.build.nsis }}
+          go-version: '1.23'
+          node-version: '20.x'
+          wails-version: 'v2.11.0'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -57,19 +59,31 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download artifacts
+      - name: Download linux artifacts
         uses: actions/download-artifact@v4
         with:
-          merge-multiple: true
+          name: linux-amd64
+          path: artifacts/linux-amd64
 
-      - name: List downloaded files
+      - name: Download windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-amd64
+          path: artifacts/windows-amd64
+
+      - name: Package archives
         run: |
-          echo "Downloaded artifacts:"
-          ls -R
+          set -e
+          mkdir -p dist
+          echo "Packaging linux tar.gz"
+          tar -C artifacts/linux-amd64 -czf dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz .
+          echo "Packaging windows zip"
+          (cd artifacts/windows-amd64 && zip -r ../../dist/shell-werk-${{ github.ref_name }}-windows-amd64.zip .)
 
       - name: Publish Release (upload assets)
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
           files: |
-            build/bin/**
+            dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz
+            dist/shell-werk-${{ github.ref_name }}-windows-amd64.zip
