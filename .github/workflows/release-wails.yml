@@ -71,14 +71,34 @@ jobs:
           name: windows-amd64
           path: artifacts/windows-amd64
 
+      - name: List downloaded artifacts
+        run: |
+          echo "Linux artifacts:"
+          find artifacts/linux-amd64 -type f
+          echo "Windows artifacts:"
+          find artifacts/windows-amd64 -type f
+        shell: bash
+
       - name: Package archives
         run: |
           set -e
           mkdir -p dist
-          echo "Packaging linux tar.gz"
-          tar -C artifacts/linux-amd64 -czf dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz .
-          echo "Packaging windows zip"
-          (cd artifacts/windows-amd64 && zip -r ../../dist/shell-werk-${{ github.ref_name }}-windows-amd64.zip .)
+          
+          # Package Linux binary
+          echo "Packaging Linux binary..."
+          cd artifacts/linux-amd64/build/bin
+          tar -czf ../../../../dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz *
+          cd -
+          
+          # Package Windows installer (NSIS) - this is the main distributable
+          echo "Packaging Windows installer..."
+          cd artifacts/windows-amd64/build/bin
+          cp shell-werk-amd64-installer.exe ../../../../dist/shell-werk-${{ github.ref_name }}-windows-amd64-installer.exe
+          cd -
+          
+          echo "Release artifacts created:"
+          ls -lh dist/
+        shell: bash
 
       - name: Publish Release (upload assets)
         uses: softprops/action-gh-release@v2
@@ -86,4 +106,4 @@ jobs:
         with:
           files: |
             dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz
-            dist/shell-werk-${{ github.ref_name }}-windows-amd64.zip
+            dist/shell-werk-${{ github.ref_name }}-windows-amd64-installer.exe
