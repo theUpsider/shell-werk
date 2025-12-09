@@ -46,7 +46,9 @@ test.describe("REQ-013: Dialogue Feedback Loop", () => {
       };
     });
 
-    await page.getByPlaceholder("Message shell-werk").fill("Trigger trace");
+    await page
+      .getByPlaceholder("Ask shell werk what to do...")
+      .fill("Trigger trace");
     await page.getByRole("button", { name: "Send" }).click();
 
     await expect(page.getByText(/tool_call · .*browser/i)).toBeVisible();
@@ -62,7 +64,7 @@ test.describe("REQ-013: Dialogue Feedback Loop", () => {
 
     await page.goto("/");
     await page
-      .getByPlaceholder("Message shell-werk")
+      .getByPlaceholder("Ask shell werk what to do...")
       .fill("Say 'hello from vllm' and then call request_fullfilled.");
     await page.getByRole("button", { name: "Send" }).click();
 

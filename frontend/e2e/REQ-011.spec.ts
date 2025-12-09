@@ -14,7 +14,7 @@ test.describe("REQ-011: Tool UI Visibility Configuration", () => {
     await page.getByRole("button", { name: "Save" }).click();
 
     await page
-      .getByPlaceholder("Message shell-werk")
+      .getByPlaceholder("Ask shell werk what to do...")
       .fill("Hidden tool default");
     await page.getByRole("button", { name: "Send" }).click();
     let payload = await page.evaluate(
@@ -28,7 +28,7 @@ test.describe("REQ-011: Tool UI Visibility Configuration", () => {
     await page.getByRole("button", { name: "Save" }).click();
 
     await page
-      .getByPlaceholder("Message shell-werk")
+      .getByPlaceholder("Ask shell werk what to do...")
       .fill("Hidden tool disabled");
     await page.getByRole("button", { name: "Send" }).click();
     payload = await page.evaluate(

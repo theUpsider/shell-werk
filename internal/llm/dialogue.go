@@ -254,6 +254,14 @@ func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCom
 		return completionChoice{}, fmt.Errorf("%s completion returned %s: %s", strings.ToUpper(l.provider), resp.Status, truncate(detail, 512))
 	}
 
+	if l.provider == "ollama" {
+		choice, err := decodeOllamaCompletion(rawBody)
+		if err != nil {
+			return completionChoice{}, fmt.Errorf("%s completion decode failed: %w", strings.ToUpper(l.provider), err)
+		}
+		return choice, nil
+	}
+
 	var decoded completionResponse
 	if err := json.Unmarshal(rawBody, &decoded); err != nil {
 		return completionChoice{}, fmt.Errorf("%s completion decode failed: %w", strings.ToUpper(l.provider), err)
@@ -462,6 +470,49 @@ func (l *dialogueLoop) completionsURL() string {
 	default:
 		return base + "/v1/chat/completions"
 	}
+}
+
+func decodeOllamaCompletion(body []byte) (completionChoice, error) {
+	var decoded ollamaResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return completionChoice{}, err
+	}
+
+	if strings.TrimSpace(decoded.Error) != "" {
+		return completionChoice{}, errors.New(strings.TrimSpace(decoded.Error))
+	}
+
+	choice := completionChoice{}
+	choice.Message.Role = decoded.Message.Role
+	if strings.TrimSpace(choice.Message.Role) == "" {
+		choice.Message.Role = "assistant"
+	}
+	choice.Message.Content = decoded.Message.Content
+	choice.Message.ToolCalls = convertOllamaChatToolCalls(decoded.Message.ToolCalls)
+
+	return choice, nil
+}
+
+func convertOllamaChatToolCalls(calls []ollamaToolCall) []chatToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+
+	out := make([]chatToolCall, 0, len(calls))
+	for _, tc := range calls {
+		args := "{}"
+		if data, err := json.Marshal(tc.Function.Arguments); err == nil {
+			args = string(data)
+		}
+		out = append(out, chatToolCall{
+			Type: "function",
+			Function: toolCallFunction{
+				Name:      tc.Function.Name,
+				Arguments: args,
+			},
+		})
+	}
+	return out
 }
 
 func (l *dialogueLoop) systemPrompt() string {

@@ -223,6 +223,13 @@ func (s *Streamer) tryOllamaChunk(chunk string, state *streamingState, role *str
 		return true, fmt.Errorf(ollama.Error)
 	}
 
+	if strings.TrimSpace(ollama.Message.Thinking) != "" {
+		state.emitThinking(ollama.Message.Thinking)
+		if ollama.Message.Content == "" && len(ollama.Message.ToolCalls) == 0 && !ollama.Done {
+			return true, nil
+		}
+	}
+
 	if ollama.Message.Content != "" || len(ollama.Message.ToolCalls) > 0 {
 		converted := convertOllamaToolCalls(ollama.Message.ToolCalls)
 		choice := streamingChoice{

@@ -67,7 +67,7 @@ describe("tool toggles", () => {
     expect(toggle).toBeEnabled();
 
     await user.type(
-      screen.getByPlaceholderText(/message shell-werk/i),
+      screen.getByPlaceholderText(/Ask shell werk what to do.../i),
       "Hello tools"
     );
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -105,7 +105,7 @@ describe("tool toggles", () => {
     render(<App />);
 
     await user.type(
-      screen.getByPlaceholderText(/message shell-werk/i),
+      screen.getByPlaceholderText(/Ask shell werk what to do.../i),
       "Hello hidden"
     );
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -128,7 +128,7 @@ describe("tool toggles", () => {
     render(<App />);
 
     await user.type(
-      screen.getByPlaceholderText(/message shell-werk/i),
+      screen.getByPlaceholderText(/Ask shell werk what to do.../i),
       "Search the web"
     );
     await user.click(screen.getByRole("button", { name: /send/i }));

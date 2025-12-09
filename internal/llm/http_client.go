@@ -11,9 +11,13 @@ func MakeClient() *http.Client {
 }
 
 func NormalizeBase(endpoint string) string {
-	trimmed := strings.TrimSuffix(endpoint, "/")
+	trimmed := strings.TrimSpace(endpoint)
+	trimmed = strings.TrimSuffix(trimmed, "/")
 	if trimmed == "" {
-		return endpoint
+		return ""
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "http://" + trimmed
 	}
 	return trimmed
 }

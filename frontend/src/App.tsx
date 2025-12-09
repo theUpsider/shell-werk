@@ -1263,7 +1263,7 @@ function App() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={handleEnterKey}
-                placeholder="Message shell-werk"
+                placeholder="Ask shell werk what to do..."
                 rows={3}
               />
               <button

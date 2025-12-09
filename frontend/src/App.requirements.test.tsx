@@ -56,7 +56,7 @@ describe("REQ-001: chat interface", () => {
 
     expect(container.querySelector(".chat-feed")).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText(/message shell-werk/i)
+      screen.getByPlaceholderText(/Ask shell werk what to do.../i)
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send/i })).toBeInTheDocument();
   });
@@ -65,7 +65,9 @@ describe("REQ-001: chat interface", () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
 
-    const textbox = screen.getByPlaceholderText(/message shell-werk/i);
+    const textbox = screen.getByPlaceholderText(
+      /Ask shell werk what to do.../i
+    );
     await user.type(textbox, "Hello there{enter}");
 
     const feed = container.querySelector(".chat-feed") as HTMLDivElement | null;
@@ -88,7 +90,7 @@ describe("REQ-001: chat interface", () => {
     feed.scrollTop = 0;
 
     await user.type(
-      screen.getByPlaceholderText(/message shell-werk/i),
+      screen.getByPlaceholderText(/Ask shell werk what to do.../i),
       "Scroll check"
     );
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -312,7 +314,7 @@ describe("REQ-003: message visualization and thinking state", () => {
     render(<App />);
 
     await user.type(
-      screen.getByPlaceholderText(/message shell-werk/i),
+      screen.getByPlaceholderText(/Ask shell werk what to do.../i),
       "Show thinking"
     );
     await user.click(screen.getByRole("button", { name: /send/i }));

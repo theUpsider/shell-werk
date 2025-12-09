@@ -43,7 +43,7 @@ test.describe("REQ-009: LLM Provider Configuration", () => {
     await expect(configChip).toContainText("mock");
 
     await page
-      .getByPlaceholder("Message shell-werk")
+      .getByPlaceholder("Ask shell werk what to do...")
       .fill("Use selected config");
     await page.getByRole("button", { name: "Send" }).click();
 

@@ -24,6 +24,7 @@ type ollamaStreamChunk struct {
 type ollamaStreamMessage struct {
 	Role      string                 `json:"role"`
 	Content   string                 `json:"content"`
+	Thinking  string                 `json:"thinking,omitempty"`
 	ToolCalls []ollamaStreamToolCall `json:"tool_calls,omitempty"`
 }
 

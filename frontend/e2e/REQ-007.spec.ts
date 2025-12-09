@@ -45,7 +45,7 @@ const acceptanceTests: AcceptanceTest[] = [
       await page.goto("/");
       await page.getByRole("button", { name: "New Chat", exact: true }).click();
 
-      const composer = page.getByPlaceholder("Message shell-werk");
+      const composer = page.getByPlaceholder("Ask shell werk what to do...");
       await composer.fill("Hello from E2E");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.getByText("Stubbed: Hello from E2E")).toBeVisible();
@@ -72,7 +72,7 @@ const acceptanceTests: AcceptanceTest[] = [
       });
       expect(providerMode).toBe("mock");
 
-      const composer = page.getByPlaceholder("Message shell-werk");
+      const composer = page.getByPlaceholder("Ask shell werk what to do...");
       await composer.fill("CI stub check");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.getByText("Stubbed: CI stub check")).toBeVisible();

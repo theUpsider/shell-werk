@@ -28,7 +28,7 @@ test.describe("REQ-012: Tool Toggling in Chat Interface", () => {
       toggleRow.getByRole("button", { name: "Disable Browser" })
     ).toBeDisabled();
 
-    const composer = page.getByPlaceholder("Message shell-werk");
+    const composer = page.getByPlaceholder("Ask shell werk what to do...");
     await composer.fill("Chat-only check");
     await page.getByRole("button", { name: "Send" }).click();
 
@@ -61,7 +61,7 @@ test.describe("REQ-012: Tool Toggling in Chat Interface", () => {
     await addButton.click();
     await toggleRow.getByRole("menuitem", { name: "Enable Browser" }).click();
 
-    const composer = page.getByPlaceholder("Message shell-werk");
+    const composer = page.getByPlaceholder("Ask shell werk what to do...");
     await composer.fill("Tools enabled");
     await page.getByRole("button", { name: "Send" }).click();
 

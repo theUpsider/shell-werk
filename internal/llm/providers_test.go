@@ -11,9 +11,11 @@ import (
 
 func TestNormalizeBase(t *testing.T) {
 	cases := map[string]string{
-		"https://example.com/": "https://example.com",
-		"https://example.com":  "https://example.com",
-		"":                     "",
+		"https://example.com/":         "https://example.com",
+		"https://example.com":          "https://example.com",
+		"localhost:11434":              "http://localhost:11434",
+		" http://localhost:11434/ ":    "http://localhost:11434",
+		"":                             "",
 	}
 
 	for input, expected := range cases {
