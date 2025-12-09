@@ -17,8 +17,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
 }) => {
   return (
     <div className="chat-header">
-      <div>
-        <p className="label">Active chat</p>
+      <div className="chat-title">
+        <span className="label">Active chat</span>
         <h2>{title || "New Chat"}</h2>
       </div>
       <div className="chip-row">
