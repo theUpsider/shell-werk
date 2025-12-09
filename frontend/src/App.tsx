@@ -662,6 +662,21 @@ function App() {
     setActiveSessionId(next.id);
   };
 
+  const handleRenameSession = (sessionId: string, title: string) => {
+    const nextTitle = title.trim() || "New Chat";
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              title: nextTitle,
+              updatedAt: new Date().toISOString(),
+            }
+          : session
+      )
+    );
+  };
+
   const handleRequestDeleteSession = (
     sessionId: string,
     event?: React.MouseEvent<HTMLButtonElement>
@@ -889,6 +904,7 @@ function App() {
           onNewChat={handleNewChat}
           onOpenSettings={() => setShowSettings(true)}
           onRequestDeleteSession={handleRequestDeleteSession}
+          onRenameSession={handleRenameSession}
         />
 
         <main className="chat-pane">

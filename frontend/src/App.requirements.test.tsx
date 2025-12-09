@@ -1,5 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -246,6 +252,79 @@ describe("REQ-002: sidebar and history", () => {
     expect(
       await screen.findByRole("dialog", { name: /model settings/i })
     ).toBeInTheDocument();
+  });
+
+  it("renames a session via right-click and persists the new title", async () => {
+    const user = userEvent.setup();
+    const timestamp = "2024-01-03T00:00:00.000Z";
+    seedSessions([
+      {
+        id: "alpha",
+        title: "Alpha session",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: [],
+      },
+      {
+        id: "beta",
+        title: "Beta session",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: [
+          {
+            id: "m2",
+            role: "user",
+            content: "Beta message",
+            createdAt: timestamp,
+          },
+        ],
+      },
+    ]);
+
+    render(<App />);
+
+    const list = screen.getByRole("navigation", { name: /past chats/i });
+    const sessionButtons = within(list)
+      .getAllByRole("button")
+      .filter(
+        (button) =>
+          !button
+            .getAttribute("aria-label")
+            ?.toLowerCase()
+            .includes("delete chat")
+      );
+    const betaButton = sessionButtons.find((button) =>
+      button.textContent?.toLowerCase().includes("beta session")
+    );
+    if (!betaButton) throw new Error("Beta session selector not found");
+
+    fireEvent.contextMenu(betaButton);
+
+    const renameInput = await screen.findByLabelText(/rename chat/i);
+    await user.clear(renameInput);
+    await user.type(renameInput, "Renamed history");
+    await user.click(screen.getByRole("button", { name: /save name/i }));
+
+    const renamedButton = within(list)
+      .getAllByRole("button")
+      .find(
+        (button) =>
+          button.textContent?.toLowerCase().includes("renamed history") &&
+          !button
+            .getAttribute("aria-label")
+            ?.toLowerCase()
+            .includes("delete chat")
+      );
+    if (!renamedButton) throw new Error("Renamed session button not found");
+    await user.click(renamedButton);
+
+    expect(
+      await screen.findByRole("heading", { name: /renamed history/i })
+    ).toBeInTheDocument();
+
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    const renamedSession = stored.find((entry: any) => entry.id === "beta");
+    expect(renamedSession?.title).toBe("Renamed history");
   });
 });
 

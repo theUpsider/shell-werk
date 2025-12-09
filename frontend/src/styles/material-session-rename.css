@@ -1,0 +1,35 @@
+.session-rename {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.session-rename-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--md-outline);
+  background: var(--md-surface-2);
+  color: var(--md-text);
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.session-rename-input:focus-visible {
+  outline: none;
+  border-color: var(--md-primary);
+  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.25);
+}
+
+.session-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.session-rename-actions .primary,
+.session-rename-actions .ghost {
+  min-width: 96px;
+  padding: 8px 12px;
+}
