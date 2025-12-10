@@ -103,6 +103,7 @@ jobs:
           rm -f "dist/$APP_NAME"
 
           WIN_ARTIFACT_DIR="artifacts/windows-amd64"
+          # Prefer the app binary (with or without .exe) while skipping uninstallers.
           find_app_binary() {
             find "$WIN_ARTIFACT_DIR" -maxdepth 8 -type f ! -iname "*uninst*" \( -iname "${APP_NAME}.exe" -o -iname "${APP_NAME}" \) | head -n1
           }
