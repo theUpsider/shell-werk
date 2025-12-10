@@ -109,17 +109,14 @@ jobs:
           WIN_INSTALLER=$(find "$WIN_ARTIFACT_DIR" -maxdepth "$MAX_DEPTH" -type f -iname "*installer.exe" | head -n1)
           if [ -z "$WIN_INSTALLER" ]; then
             echo "NSIS installer not found, falling back to main exe"
-            WIN_INSTALLER=$(find "$WIN_ARTIFACT_DIR" -maxdepth "$MAX_DEPTH" -type f ! -iname "*uninst*" -iname "${APP_NAME}.exe" | head -n1)
-            if [ -z "$WIN_INSTALLER" ]; then
-              WIN_INSTALLER=$(find "$WIN_ARTIFACT_DIR" -maxdepth "$MAX_DEPTH" -type f ! -iname "*uninst*" -iname "${APP_NAME}" | head -n1)
-            fi
-            if [ -z "$WIN_INSTALLER" ]; then
-              WIN_INSTALLER=$(find "$WIN_ARTIFACT_DIR" -maxdepth "$MAX_DEPTH" -type f ! -iname "*uninst*" -iname "*.exe" | head -n1)
-            fi
+            for pattern in "${APP_NAME}.exe" "${APP_NAME}" "*.exe"; do
+              WIN_INSTALLER=$(find "$WIN_ARTIFACT_DIR" -maxdepth "$MAX_DEPTH" -type f ! -iname "*uninst*" -iname "$pattern" | head -n1)
+              [ -n "$WIN_INSTALLER" ] && break
+            done
           fi
           if [ -z "$WIN_INSTALLER" ]; then
             echo "Windows exe/installer not found under artifacts/windows-amd64" >&2
-            find artifacts/windows-amd64 -maxdepth 8 -type f -print || true
+            find "$WIN_ARTIFACT_DIR" -maxdepth "$MAX_DEPTH" -type f -print || true
             exit 1
           fi
           cp "$WIN_INSTALLER" "dist/$APP_NAME-${{ github.ref_name }}-windows-amd64-installer.exe"
