@@ -8,6 +8,7 @@ on:
 
 env:
   NODE_OPTIONS: "--max-old-space-size=4096"
+  APP_NAME: shell-werk
 
 jobs:
   build:
@@ -92,22 +93,22 @@ jobs:
             find artifacts/linux-amd64 -maxdepth 8 -type f -print || true
             exit 1
           fi
-          cp "$LINUX_BIN" dist/shell-werk
-          tar -C dist -czf dist/shell-werk-${{ github.ref_name }}-linux-amd64.tar.gz shell-werk
-          rm -f dist/shell-werk
+          cp "$LINUX_BIN" "dist/$APP_NAME"
+          tar -C dist -czf "dist/$APP_NAME-${{ github.ref_name }}-linux-amd64.tar.gz" "$APP_NAME"
+          rm -f "dist/$APP_NAME"
 
           echo "Locating Windows installer (NSIS)..."
           WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
           if [ -z "$WIN_INSTALLER" ]; then
             echo "NSIS installer not found, falling back to main exe"
-            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f \( -iname "*.exe" -o -iname "shell-werk*" \) ! -iname "*uninst*" | head -n1)
+            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f \( -iname "*.exe" -o -iname "${APP_NAME}*" \) ! -iname "*uninst*" | head -n1)
           fi
           if [ -z "$WIN_INSTALLER" ]; then
             echo "Windows exe/installer not found under artifacts/windows-amd64" >&2
             find artifacts/windows-amd64 -maxdepth 8 -type f -print || true
             exit 1
           fi
-          cp "$WIN_INSTALLER" "dist/shell-werk-${{ github.ref_name }}-windows-amd64-installer.exe"
+          cp "$WIN_INSTALLER" "dist/$APP_NAME-${{ github.ref_name }}-windows-amd64-installer.exe"
 
           echo "Release artifacts created:"
           ls -lh dist/
