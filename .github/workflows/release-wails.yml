@@ -98,11 +98,10 @@ jobs:
           rm -f "dist/$APP_NAME"
 
           echo "Locating Windows installer (NSIS)..."
-          WIN_REGEX=".*/${APP_NAME}(\\.exe)?$"
           WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
           if [ -z "$WIN_INSTALLER" ]; then
             echo "NSIS installer not found, falling back to main exe"
-            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -regex "$WIN_REGEX" ! -iname "*uninst*" | head -n1)
+            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f \( -iname "${APP_NAME}.exe" -o -iname "${APP_NAME}" \) ! -iname "*uninst*" | head -n1)
             if [ -z "$WIN_INSTALLER" ]; then
               WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*.exe" ! -iname "*uninst*" | head -n1)
             fi
