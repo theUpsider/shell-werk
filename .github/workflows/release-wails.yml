@@ -101,7 +101,10 @@ jobs:
           WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
           if [ -z "$WIN_INSTALLER" ]; then
             echo "NSIS installer not found, falling back to main exe"
-            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f \( -regex ".*/${APP_NAME}(\\.exe)?$" -o -iname "*.exe" \) ! -iname "*uninst*" | head -n1)
+            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -regex ".*/${APP_NAME}(\\.exe)?$" ! -iname "*uninst*" | head -n1)
+            if [ -z "$WIN_INSTALLER" ]; then
+              WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*.exe" ! -iname "*uninst*" | head -n1)
+            fi
           fi
           if [ -z "$WIN_INSTALLER" ]; then
             echo "Windows exe/installer not found under artifacts/windows-amd64" >&2
