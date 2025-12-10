@@ -97,13 +97,17 @@ jobs:
           tar -C dist -czf "dist/$APP_NAME-${{ github.ref_name }}-linux-amd64.tar.gz" "$APP_NAME"
           rm -f "dist/$APP_NAME"
 
+          find_app_binary() {
+            find "$1" -maxdepth 8 -type f ! -iname "*uninst*" \( -iname "${APP_NAME}.exe" -o -iname "${APP_NAME}" \) | head -n1
+          }
+
           echo "Locating Windows installer (NSIS)..."
           WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
           if [ -z "$WIN_INSTALLER" ]; then
             echo "NSIS installer not found, falling back to main exe"
-            WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f \( -iname "${APP_NAME}.exe" -o -iname "${APP_NAME}" \) ! -iname "*uninst*" | head -n1)
+            WIN_INSTALLER=$(find_app_binary artifacts/windows-amd64)
             if [ -z "$WIN_INSTALLER" ]; then
-              WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*.exe" ! -iname "*uninst*" | head -n1)
+              WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f ! -iname "*uninst*" -iname "*.exe" | head -n1)
             fi
           fi
           if [ -z "$WIN_INSTALLER" ]; then
