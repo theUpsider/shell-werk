@@ -86,6 +86,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
 
+          if [ -z "${APP_NAME:-}" ]; then
+            echo "APP_NAME is not set" >&2
+            exit 1
+          fi
+
           echo "Packaging Linux binary..."
           LINUX_BIN=$(find artifacts/linux-amd64 -maxdepth 8 -type f ! -name "*.so" ! -name "*.dll" ! -name "*.exe" | head -n1)
           if [ -z "$LINUX_BIN" ]; then
@@ -97,17 +102,21 @@ jobs:
           tar -C dist -czf "dist/$APP_NAME-${{ github.ref_name }}-linux-amd64.tar.gz" "$APP_NAME"
           rm -f "dist/$APP_NAME"
 
+          WIN_ARTIFACT_DIR="artifacts/windows-amd64"
           find_app_binary() {
-            find "$1" -maxdepth 8 -type f ! -iname "*uninst*" \( -iname "${APP_NAME}.exe" -o -iname "${APP_NAME}" \) | head -n1
+            find "$WIN_ARTIFACT_DIR" -maxdepth 8 -type f ! -iname "*uninst*" \( -iname "${APP_NAME}.exe" -o -iname "${APP_NAME}" \) | head -n1
+          }
+          find_any_exe() {
+            find "$WIN_ARTIFACT_DIR" -maxdepth 8 -type f ! -iname "*uninst*" -iname "*.exe" | head -n1
           }
 
           echo "Locating Windows installer (NSIS)..."
-          WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
+          WIN_INSTALLER=$(find "$WIN_ARTIFACT_DIR" -maxdepth 8 -type f -iname "*installer.exe" | head -n1)
           if [ -z "$WIN_INSTALLER" ]; then
             echo "NSIS installer not found, falling back to main exe"
-            WIN_INSTALLER=$(find_app_binary artifacts/windows-amd64)
+            WIN_INSTALLER=$(find_app_binary)
             if [ -z "$WIN_INSTALLER" ]; then
-              WIN_INSTALLER=$(find artifacts/windows-amd64 -maxdepth 8 -type f ! -iname "*uninst*" -iname "*.exe" | head -n1)
+              WIN_INSTALLER=$(find_any_exe)
             fi
           fi
           if [ -z "$WIN_INSTALLER" ]; then
