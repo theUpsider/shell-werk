@@ -99,20 +99,20 @@ func DefaultTools() []ToolMetadata {
 		{
 			ID:          "shell",
 			Name:        "Shell",
-			Description: "Execute shell commands with confirmation.",
+			Description: "Execute shell commands.",
 			UIVisible:   false,
 			Enabled:     true,
 			Definition: ToolDefinition{
 				Type: "function",
 				Function: ToolFunctionDef{
 					Name:        "shell",
-					Description: "Run a whitelisted local command (echo, ls/dir, pwd).",
+					Description: "Run any command in the shell.",
 					Parameters: map[string]any{
 						"type": "object",
 						"properties": map[string]any{
 							"command": map[string]any{
 								"type":        "string",
-								"description": "Command name (echo, ls, dir, pwd)",
+								"description": "Command name (echo, ls, dir, mv, rm, etc.)",
 							},
 							"args": map[string]any{
 								"type":        "array",
