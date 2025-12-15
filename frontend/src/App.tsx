@@ -7,6 +7,7 @@ import {
   GetTools,
   Models,
   RunShellCommand,
+  ResolveContinuation,
 } from "../wailsjs/go/main/App";
 import { llm } from "../wailsjs/go/models";
 import {
@@ -20,6 +21,7 @@ import { describeError, formatProviderTarget } from "./errors";
 import { ChatFeed } from "./components/ChatFeed";
 import { ChatHeader } from "./components/ChatHeader";
 import { Composer } from "./components/Composer";
+import { ContinuationDialog } from "./components/ContinuationDialog";
 import { DeleteChatDialog } from "./components/DeleteChatDialog";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
@@ -32,6 +34,8 @@ import type {
   FeedItem,
   Role,
   ThinkingState,
+  ContinuationPrompt,
+  ContinuationResolution,
   ToolCall,
   ToolMetadata,
 } from "./types/chat";
@@ -42,6 +46,8 @@ const THINKING_START_EVENT = "thinking:start";
 const THINKING_UPDATE_EVENT = "thinking:update";
 const THINKING_END_EVENT = "thinking:end";
 const ANSWER_UPDATE_EVENT = "answer:update";
+const CONTINUATION_REQUEST_EVENT = "dialogue:continuation_request";
+const CONTINUATION_RESOLVED_EVENT = "dialogue:continuation_resolved";
 
 interface ThinkingEventPayload {
   sessionId: string;
@@ -52,6 +58,9 @@ interface AnswerEventPayload {
   sessionId: string;
   chunk: string;
 }
+
+type ContinuationRequestEventPayload = ContinuationPrompt;
+type ContinuationResolvedEventPayload = ContinuationResolution;
 
 const STORAGE_KEY = "shellwerk:sessions";
 
@@ -148,6 +157,9 @@ function App() {
   const thinkingStreamsRef = useRef<Record<string, string>>({});
   const activeSessionIdRef = useRef(activeSessionId);
   const [thinkingStreamText, setThinkingStreamText] = useState("");
+  const [continuationPrompt, setContinuationPrompt] =
+    useState<ContinuationPrompt | null>(null);
+  const [continuationBusy, setContinuationBusy] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -193,6 +205,11 @@ function App() {
     flush();
     return items;
   }, [activeSession?.messages]);
+
+  const continuationSessionTitle = useMemo(() => {
+    if (!continuationPrompt) return undefined;
+    return sessions.find((s) => s.id === continuationPrompt.sessionId)?.title;
+  }, [continuationPrompt, sessions]);
 
   const isSending = inFlightSessionId !== null;
   const isActiveSending = isSending && inFlightSessionId === activeSession?.id;
@@ -382,6 +399,24 @@ function App() {
           updateSession
         );
       }),
+      EventsOn(
+        CONTINUATION_REQUEST_EVENT,
+        (payload: ContinuationRequestEventPayload) => {
+          if (!payload?.requestId) return;
+          setContinuationBusy(false);
+          setContinuationPrompt(payload);
+        }
+      ),
+      EventsOn(
+        CONTINUATION_RESOLVED_EVENT,
+        (payload: ContinuationResolvedEventPayload) => {
+          if (!payload?.requestId) return;
+          setContinuationBusy(false);
+          setContinuationPrompt((current) =>
+            current && current.requestId === payload.requestId ? null : current
+          );
+        }
+      ),
     ];
 
     return () => disposers.forEach((dispose) => dispose());
@@ -664,6 +699,19 @@ function App() {
     }
     CancelChat(sessionId).catch((err) => {
       console.error("[Chat] Failed to cancel session", err);
+    });
+  };
+
+  const handleContinuationDecision = (decision: "continue" | "cancel") => {
+    if (!continuationPrompt) return;
+    setContinuationBusy(true);
+    ResolveContinuation({
+      sessionId: continuationPrompt.sessionId,
+      requestId: continuationPrompt.requestId,
+      decision,
+    }).catch((err: unknown) => {
+      console.error("[Chat] Failed to resolve continuation", err);
+      setContinuationBusy(false);
     });
   };
 
@@ -983,6 +1031,16 @@ function App() {
           onChangeWebSearchKey={(value) =>
             setSettings((prev) => ({ ...prev, webSearchApiKey: value }))
           }
+        />
+      )}
+
+      {continuationPrompt && (
+        <ContinuationDialog
+          prompt={continuationPrompt}
+          sessionTitle={continuationSessionTitle}
+          busy={continuationBusy}
+          onContinue={() => handleContinuationDecision("continue")}
+          onCancel={() => handleContinuationDecision("cancel")}
         />
       )}
 

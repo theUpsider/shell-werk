@@ -22,11 +22,18 @@ type App struct {
 	prompts        *llm.SystemPromptLoader
 	cancelMu       sync.Mutex
 	cancelSessions map[string]cancelEntry
+	continuationMu sync.Mutex
+	continuations  map[string]continuationWaiter
 }
 
 type cancelEntry struct {
 	cancel context.CancelFunc
 	token  string
+}
+
+type continuationWaiter struct {
+	sessionID string
+	decision  chan llm.ContinuationDecision
 }
 
 // NewApp creates a new App application struct
@@ -35,6 +42,7 @@ func NewApp() *App {
 		tools:          tools.NewToolRegistry(tools.DefaultTools()),
 		prompts:        llm.DefaultSystemPromptLoader(),
 		cancelSessions: map[string]cancelEntry{},
+		continuations:  map[string]continuationWaiter{},
 	}
 	app.applyShellToolHint(runtime.GOOS)
 	app.events = &appEventSink{app: app}
@@ -117,7 +125,10 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	ctx, timeoutCancel := context.WithTimeout(ctx, 120*time.Second)
 	defer timeoutCancel()
 
-	loop := llm.NewDialogueLoop(req, a.events, llm.DialogueDependencies{PromptLoader: a.prompts})
+	loop := llm.NewDialogueLoop(req, a.events, llm.DialogueDependencies{
+		PromptLoader:          a.prompts,
+		ContinuationPrompter: a,
+	})
 	msg, trace, err := loop.Run(ctx, req)
 	return ChatResponse{
 		Message:   msg,
@@ -146,6 +157,82 @@ func (a *App) CancelChat(sessionID string) bool {
 
 	entry.cancel()
 	return true
+}
+
+// RequestContinuation prompts the user to continue or cancel a long-running dialogue loop.
+func (a *App) RequestContinuation(ctx context.Context, sessionID string, req llm.ContinuationRequest) (llm.ContinuationDecision, error) {
+	if ctx == nil {
+		ctx = a.ctx
+	}
+
+	requestID := fmt.Sprintf("cont-%d", time.Now().UnixNano())
+	waiter := continuationWaiter{
+		sessionID: strings.TrimSpace(sessionID),
+		decision:  make(chan llm.ContinuationDecision, 1),
+	}
+
+	a.continuationMu.Lock()
+	if a.continuations == nil {
+		a.continuations = map[string]continuationWaiter{}
+	}
+	a.continuations[requestID] = waiter
+	a.continuationMu.Unlock()
+
+	a.events.emit(continuationRequestEvent, continuationRequestPayload{
+		SessionID:    waiter.sessionID,
+		RequestID:    requestID,
+		Reason:       req.Reason,
+		Iteration:    req.Iteration,
+		Limit:        req.Limit,
+		FailureCount: req.FailureCount,
+		FailureLimit: req.FailureLimit,
+		ToolName:     req.ToolName,
+		Detail:       req.Detail,
+	})
+
+	select {
+	case decision := <-waiter.decision:
+		a.clearContinuation(requestID)
+		a.events.emit(continuationResolvedEvent, continuationResolvedPayload{
+			SessionID: waiter.sessionID,
+			RequestID: requestID,
+			Decision:  string(decision),
+			Reason:    req.Reason,
+		})
+		return decision, nil
+	case <-ctx.Done():
+		a.clearContinuation(requestID)
+		a.events.emit(continuationResolvedEvent, continuationResolvedPayload{
+			SessionID: waiter.sessionID,
+			RequestID: requestID,
+			Decision:  "timeout",
+			Reason:    req.Reason,
+		})
+		return llm.ContinuationDecisionCancel, ctx.Err()
+	}
+}
+
+// ResolveContinuation is invoked by the frontend when the user responds to a continuation prompt.
+func (a *App) ResolveContinuation(req llm.ContinuationDecisionRequest) bool {
+	decision, ok := llm.ParseContinuationDecision(req.Decision)
+	if !ok {
+		decision = llm.ContinuationDecisionCancel
+	}
+
+	a.continuationMu.Lock()
+	entry, exists := a.continuations[req.RequestID]
+	a.continuationMu.Unlock()
+
+	if !exists || entry.sessionID != strings.TrimSpace(req.SessionID) {
+		return false
+	}
+
+	select {
+	case entry.decision <- decision:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) trackSessionCancel(sessionID string, cancel context.CancelFunc) string {
@@ -178,6 +265,17 @@ func (a *App) releaseSessionCancel(sessionID, token string, cancel context.Cance
 		delete(a.cancelSessions, sessionID)
 	}
 	a.cancelMu.Unlock()
+}
+
+func (a *App) clearContinuation(requestID string) {
+	if strings.TrimSpace(requestID) == "" {
+		return
+	}
+	a.continuationMu.Lock()
+	if a.continuations != nil {
+		delete(a.continuations, requestID)
+	}
+	a.continuationMu.Unlock()
 }
 
 // Models returns the provider's available models for the configured endpoint.

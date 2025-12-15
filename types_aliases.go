@@ -19,5 +19,6 @@ type ChatResponse = llm.ChatResponse
 type ModelsRequest = llm.ModelsRequest
 type ModelsResponse = llm.ModelsResponse
 type DialogueTrace = llm.DialogueTrace
+type ContinuationDecisionRequest = llm.ContinuationDecisionRequest
 
 type ShellExecutor = shell.Executor

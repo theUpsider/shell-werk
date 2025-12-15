@@ -209,6 +209,46 @@ export namespace llm {
 		    return a;
 		}
 	}
+	export class ContinuationDecisionRequest {
+	    sessionId: string;
+	    requestId: string;
+	    decision: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContinuationDecisionRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessionId = source["sessionId"];
+	        this.requestId = source["requestId"];
+	        this.decision = source["decision"];
+	    }
+	}
+	export class ContinuationRequest {
+	    reason: string;
+	    iteration?: number;
+	    limit?: number;
+	    failureCount?: number;
+	    failureLimit?: number;
+	    toolName?: string;
+	    detail?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContinuationRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.reason = source["reason"];
+	        this.iteration = source["iteration"];
+	        this.limit = source["limit"];
+	        this.failureCount = source["failureCount"];
+	        this.failureLimit = source["failureLimit"];
+	        this.toolName = source["toolName"];
+	        this.detail = source["detail"];
+	    }
+	}
 	
 	export class ModelsRequest {
 	    provider: string;

@@ -30,13 +30,20 @@ type dialogueLoop struct {
 	sessionID    string
 	promptLoader *SystemPromptLoader
 	toolExecutor ToolExecutor
+	prompter     ContinuationPrompter
+	iterationLimit int
+	failureLimit   int
+	completionRequester completionRequester
 }
 
 type DialogueDependencies struct {
 	Client       *http.Client
 	PromptLoader *SystemPromptLoader
 	ToolExecutor ToolExecutor
+	ContinuationPrompter ContinuationPrompter
 }
+
+type completionRequester func(ctx context.Context, messages []chatCompletionMessage, tools []tools.ToolDefinition) (completionChoice, error)
 
 func NewDialogueLoop(req ChatRequest, sink StreamEventSink, deps DialogueDependencies) *dialogueLoop {
 	client := deps.Client
@@ -57,8 +64,12 @@ func NewDialogueLoop(req ChatRequest, sink StreamEventSink, deps DialogueDepende
 			WebSearchEndpoint: req.WebSearchEndpoint,
 		})
 	}
+	prompter := deps.ContinuationPrompter
+	if prompter == nil {
+		prompter = autoContinuePrompter{}
+	}
 
-	return &dialogueLoop{
+	loop := &dialogueLoop{
 		provider:     strings.ToLower(req.Provider),
 		endpoint:     req.Endpoint,
 		apiKey:       req.APIKey,
@@ -70,7 +81,13 @@ func NewDialogueLoop(req ChatRequest, sink StreamEventSink, deps DialogueDepende
 		sessionID:    strings.TrimSpace(req.SessionID),
 		promptLoader: promptLoader,
 		toolExecutor: toolExecutor,
+		prompter:     prompter,
+		iterationLimit: 30,
+		failureLimit:   5,
 	}
+	loop.completionRequester = loop.requestCompletion
+
+	return loop
 }
 
 func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, []DialogueTrace, error) {
@@ -102,9 +119,36 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 		messages = append(messages, chatCompletionMessage{Role: msg.Role, Content: msg.Content})
 	}
 
-	// Allow up to 30 tool iterations per request to avoid runaway loops.
-	for iteration := 0; iteration < 30; iteration++ {
-		choice, err := l.requestCompletion(ctx, messages, toolDefs)
+	iterationLimit := l.iterationLimit
+	failureLimit := l.failureLimit
+
+	for iteration := 0; ; iteration++ {
+		if iteration >= iterationLimit {
+			prompt := fmt.Sprintf("Reached %d tool iterations. Continue?", iteration)
+			continueLoop, err := l.handleContinuation(ctx, &trace, ContinuationRequest{
+				Reason:    "iteration_limit",
+				Iteration: iteration,
+				Limit:     iterationLimit,
+			}, prompt)
+			if err != nil {
+				return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Stopped while waiting for approval: %s", err.Error())}, trace, err
+			}
+			if !continueLoop {
+				stop := fmt.Sprintf("Stopped after %d tool iterations at your request.", iteration)
+				trace = append(trace, DialogueTrace{
+					ID:        newTraceID(),
+					Role:      "assistant",
+					Kind:      "final",
+					Status:    "cancelled",
+					Content:   stop,
+					CreatedAt: time.Now(),
+				})
+				return ChatMessage{Role: "assistant", Content: stop}, trace, nil
+			}
+			iterationLimit += 10
+		}
+
+		choice, err := l.completionRequester(ctx, messages, toolDefs)
 		if err != nil {
 			trace = append(trace, DialogueTrace{
 				ID:        newTraceID(),
@@ -200,16 +244,32 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 			if status == "error" {
 				key := fmt.Sprintf("%s|%s", tc.Function.Name, tc.Function.Arguments)
 				failures[key]++
-				if failures[key] >= 5 {
-					trace = append(trace, DialogueTrace{
-						ID:        newTraceID(),
-						Role:      "assistant",
-						Kind:      "final",
-						Status:    "failed",
-						Content:   fmt.Sprintf("Stopping after repeated %s tool failures: %s", tc.Function.Name, result),
-						CreatedAt: time.Now(),
-					})
-					return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Stopping after repeated %s tool failures: %s", tc.Function.Name, result)}, trace, errors.New("dialogue loop halted after repeated tool errors")
+				if failures[key] >= failureLimit {
+					prompt := fmt.Sprintf("The %s tool failed %d times. Continue?", tc.Function.Name, failures[key])
+					continueLoop, err := l.handleContinuation(ctx, &trace, ContinuationRequest{
+						Reason:       "tool_failures",
+						FailureCount: failures[key],
+						FailureLimit: failureLimit,
+						ToolName:     tc.Function.Name,
+						Detail:       result,
+					}, prompt)
+					if err != nil {
+						return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Stopped while waiting for approval: %s", err.Error())}, trace, err
+					}
+					if !continueLoop {
+						stop := fmt.Sprintf("Stopped after repeated %s tool failures at your request.", tc.Function.Name)
+						trace = append(trace, DialogueTrace{
+							ID:        newTraceID(),
+							Role:      "assistant",
+							Kind:      "final",
+							Status:    "cancelled",
+							Content:   stop,
+							CreatedAt: time.Now(),
+						})
+						return ChatMessage{Role: "assistant", Content: stop}, trace, nil
+					}
+					failures[key] = 0
+					failureLimit += 2
 				}
 			}
 
@@ -227,12 +287,12 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 		Role:      "assistant",
 		Kind:      "timeout",
 		Status:    "timeout",
-		Content:   "Loop ended after 12 iterations without request_fullfilled.",
+		Content:   "Loop ended without completion signal.",
 		CreatedAt: time.Now(),
 	})
 
 	elapsed := time.Since(start).Round(time.Second)
-	return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Request stopped after %s without completion.", elapsed)}, trace, errors.New("dialogue loop exceeded iteration limit")
+	return ChatMessage{Role: "assistant", Content: fmt.Sprintf("Request stopped after %s without completion.", elapsed)}, trace, errors.New("dialogue loop ended without completion")
 }
 
 func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCompletionMessage, tools []tools.ToolDefinition) (completionChoice, error) {
@@ -359,6 +419,53 @@ func convertOllamaChatToolCalls(calls []ollamaToolCall) []chatToolCall {
 		})
 	}
 	return out
+}
+
+func (l *dialogueLoop) handleContinuation(ctx context.Context, trace *[]DialogueTrace, req ContinuationRequest, prompt string) (bool, error) {
+	if l.prompter == nil {
+		return true, nil
+	}
+
+	if strings.TrimSpace(prompt) != "" {
+		l.emitThinkingf("%s", prompt)
+	}
+
+	if trace != nil {
+		*trace = append(*trace, DialogueTrace{
+			ID:        newTraceID(),
+			Role:      "assistant",
+			Kind:      "continuation",
+			Title:     "Approval required",
+			Status:    "pending",
+			Content:   prompt,
+			CreatedAt: time.Now(),
+		})
+	}
+
+	decision, err := l.prompter.RequestContinuation(ctx, l.sessionID, req)
+	if err != nil {
+		return false, err
+	}
+
+	if trace != nil {
+		status := "continued"
+		message := "User approved continuing generation."
+		if decision == ContinuationDecisionCancel {
+			status = "cancelled"
+			message = "User stopped generation."
+		}
+		*trace = append(*trace, DialogueTrace{
+			ID:        newTraceID(),
+			Role:      "assistant",
+			Kind:      "continuation",
+			Title:     "Approval resolved",
+			Status:    status,
+			Content:   message,
+			CreatedAt: time.Now(),
+		})
+	}
+
+	return decision == ContinuationDecisionContinue, nil
 }
 
 func (l *dialogueLoop) emitThinkingf(format string, args ...any) {

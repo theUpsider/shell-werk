@@ -49,6 +49,25 @@ export interface ChatResponsePayload {
   trace?: DialogueTrace[];
 }
 
+export interface ContinuationPrompt {
+  sessionId: string;
+  requestId: string;
+  reason: "iteration_limit" | "tool_failures";
+  iteration?: number;
+  limit?: number;
+  failureCount?: number;
+  failureLimit?: number;
+  toolName?: string;
+  detail?: string;
+}
+
+export interface ContinuationResolution {
+  sessionId: string;
+  requestId: string;
+  decision: "continue" | "cancel" | "timeout";
+  reason?: string;
+}
+
 export interface ToolMetadata {
   id: string;
   name: string;
