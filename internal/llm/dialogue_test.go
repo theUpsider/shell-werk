@@ -35,13 +35,13 @@ func TestWebSearchToolSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	loop := &dialogueLoop{
-		client:            server.Client(),
-		webSearchAPIKey:   "secret-key",
-		webSearchEndpoint: server.URL,
-	}
+	executor := NewToolExecutor(ToolExecutorConfig{
+		Client:            server.Client(),
+		WebSearchAPIKey:   "secret-key",
+		WebSearchEndpoint: server.URL,
+	})
 
-	result, status := loop.webSearchTool(ctx, map[string]any{"query": "golang", "count": float64(1)})
+	result, status := executor.Execute(ctx, "web_search", map[string]any{"query": "golang", "count": float64(1)})
 	if status != "done" {
 		t.Fatalf("expected status done, got %s", status)
 	}
@@ -58,9 +58,9 @@ func TestWebSearchToolSuccess(t *testing.T) {
 
 func TestWebSearchToolMissingKey(t *testing.T) {
 	ctx := context.Background()
-	loop := &dialogueLoop{client: http.DefaultClient}
+	executor := NewToolExecutor(ToolExecutorConfig{Client: http.DefaultClient})
 
-	result, status := loop.webSearchTool(ctx, map[string]any{"query": "test"})
+	result, status := executor.Execute(ctx, "web_search", map[string]any{"query": "test"})
 	if status != "error" {
 		t.Fatalf("expected error status, got %s", status)
 	}

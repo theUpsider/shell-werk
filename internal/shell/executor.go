@@ -50,7 +50,7 @@ func (e *Executor) Validate(command string, args []string) error {
 	// Check for root/system directory targeting (very basic check)
 	if runtime.GOOS == "windows" {
 		if strings.Contains(fullCmd, "C:\\Windows") || strings.Contains(fullCmd, "C:\\Program Files") {
-			// Block system directories
+			return errors.New("command targets protected system directory")
 		}
 	} else {
 		if fullCmd == "rm -rf /" || strings.HasPrefix(fullCmd, "rm -rf /") {

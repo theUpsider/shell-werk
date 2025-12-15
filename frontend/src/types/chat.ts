@@ -17,6 +17,7 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   toolCalls?: ToolCall[];
+  isPlaceholder?: boolean;
   isTrace?: boolean;
   traceKind?: string;
   traceTitle?: string;

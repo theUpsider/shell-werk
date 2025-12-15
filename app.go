@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ type App struct {
 	tools          *tools.ToolRegistry
 	streamer       *llm.Streamer
 	events         *appEventSink
+	prompts        *llm.SystemPromptLoader
 	cancelMu       sync.Mutex
 	cancelSessions map[string]cancelEntry
 }
@@ -31,11 +33,33 @@ type cancelEntry struct {
 func NewApp() *App {
 	app := &App{
 		tools:          tools.NewToolRegistry(tools.DefaultTools()),
+		prompts:        llm.DefaultSystemPromptLoader(),
 		cancelSessions: map[string]cancelEntry{},
 	}
+	app.applyShellToolHint(runtime.GOOS)
 	app.events = &appEventSink{app: app}
 	app.streamer = llm.NewStreamer(app.events)
 	return app
+}
+
+func (a *App) applyShellToolHint(hostOS string) {
+	shellHint := "Shell tool executes commands directly without a wrapping shell; prefer POSIX-friendly commands and paths."
+	if hostOS == "windows" {
+		shellHint = "Shell tool uses PowerShell; prefer PowerShell-friendly commands and paths."
+	}
+
+	list := a.tools.List()
+	updated := make([]tools.ToolMetadata, 0, len(list))
+	for _, tool := range list {
+		if tool.ID == "shell" {
+			baseDesc := strings.TrimSpace(tool.Description)
+			funcDesc := strings.TrimSpace(tool.Definition.Function.Description)
+			tool.Description = strings.TrimSpace(fmt.Sprintf("%s %s", baseDesc, shellHint))
+			tool.Definition.Function.Description = strings.TrimSpace(fmt.Sprintf("%s %s", funcDesc, shellHint))
+		}
+		updated = append(updated, tool)
+	}
+	a.tools = tools.NewToolRegistry(updated)
 }
 
 // startup is called when the app starts. The context is saved
@@ -65,6 +89,11 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	req.History = llm.ConversationFromRequest(req)
 	req.Message = ""
 
+	if req.ChatOnly {
+		req.Tools = nil
+		req.ToolDefs = nil
+	}
+
 	for _, id := range req.Tools {
 		if tool, ok := a.tools.Get(id); ok {
 			req.ToolDefs = append(req.ToolDefs, tool.Definition)
@@ -88,7 +117,7 @@ func (a *App) Chat(req ChatRequest) (ChatResponse, error) {
 	ctx, timeoutCancel := context.WithTimeout(ctx, 120*time.Second)
 	defer timeoutCancel()
 
-	loop := llm.NewDialogueLoop(req, a.events)
+	loop := llm.NewDialogueLoop(req, a.events, llm.DialogueDependencies{PromptLoader: a.prompts})
 	msg, trace, err := loop.Run(ctx, req)
 	return ChatResponse{
 		Message:   msg,

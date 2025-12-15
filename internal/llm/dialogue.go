@@ -2,7 +2,6 @@ package llm
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,50 +9,67 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
-	"shell-werk/internal/shell"
 	"shell-werk/internal/tools"
 )
 
 const braveSearchEndpointDefault = "https://api.search.brave.com/res/v1/web/search"
 
 type dialogueLoop struct {
-	provider          string
-	endpoint          string
-	apiKey            string
-	model             string
-	tools             []string
-	toolDefs          []tools.ToolDefinition
-	client            *http.Client
-	webSearchAPIKey   string
-	webSearchEndpoint string
-	sink              StreamEventSink
-	sessionID         string
+	provider     string
+	endpoint     string
+	apiKey       string
+	model        string
+	tools        []string
+	toolDefs     []tools.ToolDefinition
+	client       *http.Client
+	sink         StreamEventSink
+	sessionID    string
+	promptLoader *SystemPromptLoader
+	toolExecutor ToolExecutor
 }
 
-func NewDialogueLoop(req ChatRequest, sink StreamEventSink) *dialogueLoop {
-	webSearchEndpoint := braveSearchEndpointDefault
-	if trimmed := strings.TrimSpace(req.WebSearchEndpoint); trimmed != "" {
-		webSearchEndpoint = trimmed
+type DialogueDependencies struct {
+	Client       *http.Client
+	PromptLoader *SystemPromptLoader
+	ToolExecutor ToolExecutor
+}
+
+func NewDialogueLoop(req ChatRequest, sink StreamEventSink, deps DialogueDependencies) *dialogueLoop {
+	client := deps.Client
+	if client == nil {
+		client = MakeClient()
+	}
+
+	promptLoader := deps.PromptLoader
+	if promptLoader == nil {
+		promptLoader = DefaultSystemPromptLoader()
+	}
+
+	toolExecutor := deps.ToolExecutor
+	if toolExecutor == nil {
+		toolExecutor = NewToolExecutor(ToolExecutorConfig{
+			Client:            client,
+			WebSearchAPIKey:   req.WebSearchAPIKey,
+			WebSearchEndpoint: req.WebSearchEndpoint,
+		})
 	}
 
 	return &dialogueLoop{
-		provider:          strings.ToLower(req.Provider),
-		endpoint:          req.Endpoint,
-		apiKey:            req.APIKey,
-		model:             req.Model,
-		tools:             req.Tools,
-		toolDefs:          req.ToolDefs,
-		client:            MakeClient(),
-		webSearchAPIKey:   strings.TrimSpace(req.WebSearchAPIKey),
-		webSearchEndpoint: webSearchEndpoint,
-		sink:              sink,
-		sessionID:         strings.TrimSpace(req.SessionID),
+		provider:     strings.ToLower(req.Provider),
+		endpoint:     req.Endpoint,
+		apiKey:       req.APIKey,
+		model:        req.Model,
+		tools:        req.Tools,
+		toolDefs:     req.ToolDefs,
+		client:       client,
+		sink:         sink,
+		sessionID:    strings.TrimSpace(req.SessionID),
+		promptLoader: promptLoader,
+		toolExecutor: toolExecutor,
 	}
 }
 
@@ -63,16 +79,31 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 	failures := map[string]int{}
 
 	toolDefs := l.toolDefs
+
+	systemPrompt, promptErr := l.promptLoader.Load(runtime.GOOS)
+	if promptErr != nil {
+		err := fmt.Errorf("load system prompt: %w", promptErr)
+		trace = append(trace, DialogueTrace{
+			ID:        newTraceID(),
+			Role:      "assistant",
+			Kind:      "error",
+			Status:    "failed",
+			Content:   err.Error(),
+			CreatedAt: time.Now(),
+		})
+		return ChatMessage{Role: "assistant", Content: err.Error()}, trace, err
+	}
+
 	messages := []chatCompletionMessage{
-		{Role: "system", Content: l.systemPrompt()},
+		{Role: "system", Content: systemPrompt},
 	}
 
 	for _, msg := range ConversationFromRequest(req) {
 		messages = append(messages, chatCompletionMessage{Role: msg.Role, Content: msg.Content})
 	}
 
-	// Allow up to 12 tool iterations per request to avoid runaway loops.
-	for iteration := 0; iteration < 12; iteration++ {
+	// Allow up to 30 tool iterations per request to avoid runaway loops.
+	for iteration := 0; iteration < 30; iteration++ {
 		choice, err := l.requestCompletion(ctx, messages, toolDefs)
 		if err != nil {
 			trace = append(trace, DialogueTrace{
@@ -154,7 +185,7 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 				continue
 			}
 
-			result, status := l.executeTool(ctx, tc.Function.Name, argsMap)
+			result, status := l.toolExecutor.Execute(ctx, tc.Function.Name, argsMap)
 			trace = append(trace, DialogueTrace{
 				ID:        newTraceID(),
 				Role:      "tool",
@@ -169,7 +200,7 @@ func (l *dialogueLoop) Run(ctx context.Context, req ChatRequest) (ChatMessage, [
 			if status == "error" {
 				key := fmt.Sprintf("%s|%s", tc.Function.Name, tc.Function.Arguments)
 				failures[key]++
-				if failures[key] >= 2 {
+				if failures[key] >= 5 {
 					trace = append(trace, DialogueTrace{
 						ID:        newTraceID(),
 						Role:      "assistant",
@@ -277,191 +308,6 @@ func (l *dialogueLoop) requestCompletion(ctx context.Context, messages []chatCom
 	return decoded.Choices[0], nil
 }
 
-func (l *dialogueLoop) executeTool(ctx context.Context, name string, args map[string]any) (string, string) {
-	switch name {
-	case "browser":
-		return l.browserTool(ctx, args)
-	case "shell":
-		return l.shellTool(ctx, args)
-	case "web_search":
-		return l.webSearchTool(ctx, args)
-	default:
-		return fmt.Sprintf("tool %s is not implemented", name), "error"
-	}
-}
-
-func (l *dialogueLoop) browserTool(ctx context.Context, args map[string]any) (string, string) {
-	rawURL, _ := args["url"].(string)
-	if strings.TrimSpace(rawURL) == "" {
-		return "missing url argument", "error"
-	}
-
-	maxBytes := 2_048
-	if val, ok := args["maxBytes"].(float64); ok && val > 256 {
-		maxBytes = int(val)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return fmt.Sprintf("request build failed: %v", err), "error"
-	}
-
-	resp, err := l.client.Do(req)
-	if err != nil {
-		return fmt.Sprintf("request failed: %v", err), "error"
-	}
-	defer resp.Body.Close()
-
-	limited := io.LimitedReader{R: resp.Body, N: int64(maxBytes)}
-	buf, err := io.ReadAll(&limited)
-	if err != nil {
-		return fmt.Sprintf("read failed: %v", err), "error"
-	}
-
-	preview := strings.TrimSpace(string(buf))
-	if preview == "" {
-		preview = fmt.Sprintf("(%s returned no body)", rawURL)
-	}
-	return truncate(preview, maxBytes), "done"
-}
-
-func (l *dialogueLoop) shellTool(ctx context.Context, args map[string]any) (string, string) {
-	cmdName, _ := args["command"].(string)
-	if strings.TrimSpace(cmdName) == "" {
-		return "missing command", "error"
-	}
-
-	var cmdArgs []string
-	if rawArgs, ok := args["args"].([]any); ok {
-		for _, item := range rawArgs {
-			if s, ok := item.(string); ok {
-				cmdArgs = append(cmdArgs, s)
-			}
-		}
-	} else if rawArgs, ok := args["args"].([]string); ok {
-		cmdArgs = append(cmdArgs, rawArgs...)
-	}
-
-	executor := shell.NewExecutor()
-	output, err := executor.Execute(ctx, cmdName, cmdArgs)
-	if err != nil {
-		failure := strings.TrimSpace(output)
-		if failure == "" {
-			failure = err.Error()
-		}
-		return truncate(failure, 2_048), "error"
-	}
-
-	if output == "" {
-		output = "(command completed with no output)"
-	}
-	return truncate(output, 2_048), "done"
-}
-
-func (l *dialogueLoop) webSearchTool(ctx context.Context, args map[string]any) (string, string) {
-	query, _ := args["query"].(string)
-	if strings.TrimSpace(query) == "" {
-		return "missing query", "error"
-	}
-
-	if l.webSearchAPIKey == "" {
-		return "Brave Search API key is not set. Add it in Settings before using web search.", "error"
-	}
-
-	count := 3
-	if val, ok := args["count"].(float64); ok {
-		if parsed := int(val); parsed >= 1 && parsed <= 20 {
-			count = parsed
-		}
-	}
-
-	searchURL := l.webSearchEndpoint
-	if strings.TrimSpace(searchURL) == "" {
-		searchURL = braveSearchEndpointDefault
-	}
-
-	parsedURL, err := url.Parse(searchURL)
-	if err != nil {
-		return fmt.Sprintf("invalid search endpoint: %v", err), "error"
-	}
-	q := parsedURL.Query()
-	q.Set("q", query)
-	q.Set("count", strconv.Itoa(count))
-	parsedURL.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
-	if err != nil {
-		return fmt.Sprintf("request build failed: %v", err), "error"
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
-	req.Header.Set("X-Subscription-Token", l.webSearchAPIKey)
-
-	resp, err := l.client.Do(req)
-	if err != nil {
-		return fmt.Sprintf("search request failed: %v", err), "error"
-	}
-	defer resp.Body.Close()
-
-	var reader io.Reader = resp.Body
-	var gz *gzip.Reader
-	if strings.Contains(resp.Header.Get("Content-Encoding"), "gzip") {
-		gz, err = gzip.NewReader(resp.Body)
-		if err != nil {
-			return fmt.Sprintf("failed to decompress response: %v", err), "error"
-		}
-		defer gz.Close()
-		reader = gz
-	}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(io.LimitReader(reader, 2_048))
-		detail := strings.TrimSpace(string(body))
-		if detail == "" {
-			detail = resp.Status
-		}
-		return fmt.Sprintf("Brave Search returned %s: %s", resp.Status, truncate(detail, 512)), "error"
-	}
-
-	var decoded struct {
-		Web struct {
-			Results []struct {
-				Title       string `json:"title"`
-				URL         string `json:"url"`
-				Description string `json:"description"`
-			} `json:"results"`
-		} `json:"web"`
-	}
-
-	if err := json.NewDecoder(reader).Decode(&decoded); err != nil {
-		return fmt.Sprintf("decode failed: %v", err), "error"
-	}
-
-	if len(decoded.Web.Results) == 0 {
-		return fmt.Sprintf("No results found for %q.", query), "done"
-	}
-
-	var builder strings.Builder
-	for i, item := range decoded.Web.Results {
-		if i >= count {
-			break
-		}
-		title := strings.TrimSpace(item.Title)
-		if title == "" {
-			title = "(untitled result)"
-		}
-		fmt.Fprintf(&builder, "%d. %s\n%s\n", i+1, title, strings.TrimSpace(item.URL))
-		if desc := strings.TrimSpace(item.Description); desc != "" {
-			builder.WriteString("Summary: ")
-			builder.WriteString(desc)
-			builder.WriteString("\n")
-		}
-		builder.WriteString("\n")
-	}
-
-	return truncate(builder.String(), 2_048), "done"
-}
-
 func (l *dialogueLoop) completionsURL() string {
 	base := NormalizeBase(l.endpoint)
 	switch l.provider {
@@ -513,20 +359,6 @@ func convertOllamaChatToolCalls(calls []ollamaToolCall) []chatToolCall {
 		})
 	}
 	return out
-}
-
-func (l *dialogueLoop) systemPrompt() string {
-	hostOS := runtime.GOOS
-	shellHint := "Shell tool executes commands directly without a wrapping shell; prefer POSIX-friendly commands and paths."
-	if hostOS == "windows" {
-		shellHint = "Shell tool uses PowerShell; prefer PowerShell-friendly commands and paths."
-	}
-
-	return fmt.Sprintf(
-		"You are a helpful assistant named shell-werk. The Host OS is: %s. %s . Prefer web_search for factual lookups; only use shell when the user explicitly asks for commands. Do not retry missing commands; Use as few tool calls as possible to generate the final answer. When the user request is satisfied, immediatly call the tool request_fullfilled with a concise summary.",
-		hostOS,
-		shellHint,
-	)
 }
 
 func (l *dialogueLoop) emitThinkingf(format string, args ...any) {

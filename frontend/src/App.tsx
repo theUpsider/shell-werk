@@ -84,7 +84,13 @@ const applyAssistantContent = (
   updateSession(sessionId, (session) => ({
     ...session,
     messages: session.messages.map((msg) =>
-      msg.id === placeholderId ? { ...msg, content } : msg
+      msg.id === placeholderId
+        ? {
+            ...msg,
+            content,
+            ...(content.trim().length > 0 ? { isPlaceholder: false } : {}),
+          }
+        : msg
     ),
     updatedAt: new Date().toISOString(),
   }));
@@ -163,6 +169,17 @@ function App() {
     };
 
     messages.forEach((message) => {
+      const isAssistantPlaceholder =
+        message.isPlaceholder ||
+        (message.role === "assistant" &&
+          message.content === "Assistant is thinking..." &&
+          !message.toolCalls);
+
+      if (isAssistantPlaceholder) {
+        flush();
+        return;
+      }
+
       if (message.isTrace) {
         if (message.traceKind === "final") return;
         buffer.push(message);
@@ -486,8 +503,9 @@ function App() {
     const assistantPlaceholder: ChatMessage = {
       id: createId(),
       role: "assistant",
-      content: "Assistant is thinking...",
+      content: "",
       createdAt: new Date().toISOString(),
+      isPlaceholder: true,
     };
 
     updateSession(sessionId, (session) => {
